@@ -38,6 +38,25 @@ class CustomerControllerTests {
                 .andExpect(jsonPath("$.firstName").value("Onur"))
                 .andExpect(jsonPath("$.lastName").value("Can"))
                 .andExpect(jsonPath("$.email").value("onur@example.com"));
+
+        mockMvc.perform(get("/customers/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.firstName").value("Onur"))
+                .andExpect(jsonPath("$.lastName").value("Can"))
+                .andExpect(jsonPath("$.email").value("onur@example.com"));
+    }
+
+    @Test
+    void returnsNotFoundForUnknownCustomer() throws Exception {
+        mockMvc.perform(get("/customers/999999"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void rejectsInvalidCustomerId() throws Exception {
+        mockMvc.perform(get("/customers/0"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

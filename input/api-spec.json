@@ -1,25 +1,15 @@
 {
-  "operationName": "createCustomer",
-  "httpMethod": "POST",
-  "path": "/customers",
-  "description": "Yeni müşteri oluşturur.",
+  "operationName": "getCustomerById",
+  "httpMethod": "GET",
+  "path": "/customers/{id}",
+  "description": "ID ile müşteri getirir.",
   "requestSchema": {
     "type": "object",
-    "fields": {
-      "firstName": {
-        "type": "string",
+    "pathParameters": {
+      "id": {
+        "type": "long",
         "required": true,
-        "minLength": 2
-      },
-      "lastName": {
-        "type": "string",
-        "required": true,
-        "minLength": 2
-      },
-      "email": {
-        "type": "string",
-        "required": true,
-        "format": "email"
+        "minimum": 1
       }
     }
   },
@@ -41,33 +31,40 @@
     }
   },
   "validationRules": [
-    "firstName boş olamaz ve en az 2 karakter olmalı.",
-    "lastName boş olamaz ve en az 2 karakter olmalı.",
-    "email boş olamaz ve geçerli email formatında olmalı."
+    "id 1 veya daha büyük olmalı."
   ],
   "expectedStatusCodes": [
     {
-      "status": 201,
-      "name": "CREATED",
-      "description": "Başarılı oluşturma."
+      "status": 200,
+      "name": "OK",
+      "description": "Müşteri bulundu."
     },
     {
       "status": 400,
       "name": "BAD_REQUEST",
-      "description": "Validation hatası."
+      "description": "ID geçersiz."
+    },
+    {
+      "status": 404,
+      "name": "NOT_FOUND",
+      "description": "Müşteri bulunamadı."
     }
   ],
   "businessRules": [
-    "Şimdilik gerçek database kullanılmayacak.",
-    "Oluşturulan müşteri memory içinde temsil edilebilir.",
-    "id değeri deterministic şekilde üretilmeli veya basit sabit test değeri kullanılmalı."
+    "Mevcut memory tabanlı CustomerService yapısını kullan.",
+    "Yeni müşteri storage/service implementasyonu oluşturma.",
+    "ID ile kayıt bulunabiliyorsa mevcut CustomerResponse formatında döndür.",
+    "Kayıt yoksa 404 döndür."
   ],
   "persistenceRequired": false,
   "externalServiceRequired": false,
   "acceptanceCriteria": [
-    "POST /customers valid request ile 201 dönmeli.",
-    "Response JSON tanımlanan alanları içermeli.",
-    "Invalid request 400 dönmeli.",
+    "GET /customers/{id} mevcut müşteri için 200 dönmeli.",
+    "Response mevcut CustomerResponse kontratını kullanmalı.",
+    "Olmayan müşteri için 404 dönmeli.",
+    "Geçersiz id için 400 dönmeli.",
+    "Mevcut POST /customers davranışı bozulmamalı.",
+    "Mevcut GET /hello davranışı bozulmamalı.",
     "Endpoint için test yazılmalı.",
     "./mvnw test başarılı olmalı.",
     "./mvnw clean package başarılı olmalı."

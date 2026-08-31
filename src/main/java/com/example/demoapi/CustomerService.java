@@ -3,6 +3,7 @@ package com.example.demoapi;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -22,5 +23,9 @@ public class CustomerService {
         );
         customers.put(id, customer);
         return customer;
+    }
+
+    public Optional<CustomerResponse> findById(long id) {
+        return Optional.ofNullable(customers.get(id));
     }
 }
