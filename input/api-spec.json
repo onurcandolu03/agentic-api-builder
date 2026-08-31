@@ -1,15 +1,25 @@
 {
-  "operationName": "getCustomerById",
-  "httpMethod": "GET",
-  "path": "/customers/{id}",
-  "description": "ID ile müşteri getirir.",
+  "operationName": "createCustomerWithUniqueEmail",
+  "httpMethod": "POST",
+  "path": "/customers",
+  "description": "Benzersiz email adresi ile yeni müşteri oluşturur.",
   "requestSchema": {
     "type": "object",
-    "pathParameters": {
-      "id": {
-        "type": "long",
+    "fields": {
+      "firstName": {
+        "type": "string",
         "required": true,
-        "minimum": 1
+        "minLength": 2
+      },
+      "lastName": {
+        "type": "string",
+        "required": true,
+        "minLength": 2
+      },
+      "email": {
+        "type": "string",
+        "required": true,
+        "format": "email"
       }
     }
   },
@@ -31,41 +41,49 @@
     }
   },
   "validationRules": [
-    "id 1 veya daha büyük olmalı."
+    "firstName boş olamaz ve en az 2 karakter olmalı.",
+    "lastName boş olamaz ve en az 2 karakter olmalı.",
+    "email boş olamaz ve geçerli email formatında olmalı."
   ],
   "expectedStatusCodes": [
     {
-      "status": 200,
-      "name": "OK",
-      "description": "Müşteri bulundu."
+      "status": 201,
+      "name": "CREATED",
+      "description": "Müşteri başarıyla oluşturuldu."
     },
     {
       "status": 400,
       "name": "BAD_REQUEST",
-      "description": "ID geçersiz."
+      "description": "Request validation başarısız."
     },
     {
-      "status": 404,
-      "name": "NOT_FOUND",
-      "description": "Müşteri bulunamadı."
+      "status": 409,
+      "name": "CONFLICT",
+      "description": "Aynı email adresine sahip müşteri zaten mevcut."
     }
   ],
   "businessRules": [
-    "Mevcut memory tabanlı CustomerService yapısını kullan.",
-    "Yeni müşteri storage/service implementasyonu oluşturma.",
-    "ID ile kayıt bulunabiliyorsa mevcut CustomerResponse formatında döndür.",
-    "Kayıt yoksa 404 döndür."
+    "Email adresi müşteri kayıtları arasında benzersiz olmalı.",
+    "Aynı email adresiyle ikinci müşteri oluşturulmamalı.",
+    "Duplicate email kontrolü mevcut CustomerService ve mevcut memory storage kullanılarak yapılmalı.",
+    "Duplicate kontrolü case-insensitive olmalı.",
+    "Duplicate email durumunda yeni ID üretilmemeli.",
+    "Duplicate email durumunda mevcut müşteri kaydı değiştirilmemeli.",
+    "Yeni repository, yeni storage implementasyonu veya yeni customer service oluşturulmamalı.",
+    "Mevcut GET /customers/{id} davranışı korunmalı."
   ],
   "persistenceRequired": false,
   "externalServiceRequired": false,
   "acceptanceCriteria": [
-    "GET /customers/{id} mevcut müşteri için 200 dönmeli.",
-    "Response mevcut CustomerResponse kontratını kullanmalı.",
-    "Olmayan müşteri için 404 dönmeli.",
-    "Geçersiz id için 400 dönmeli.",
-    "Mevcut POST /customers davranışı bozulmamalı.",
-    "Mevcut GET /hello davranışı bozulmamalı.",
-    "Endpoint için test yazılmalı.",
+    "İlk geçerli POST /customers isteği 201 CREATED dönmeli.",
+    "Aynı email ile ikinci POST /customers isteği 409 CONFLICT dönmeli.",
+    "Email karşılaştırması case-insensitive olmalı.",
+    "Duplicate istekte yeni müşteri oluşturulmamalı.",
+    "Duplicate istekte yeni ID tüketilmemeli.",
+    "Validation hataları 400 BAD_REQUEST dönmeye devam etmeli.",
+    "Mevcut GET /customers/{id} çalışmaya devam etmeli.",
+    "Mevcut GET /hello çalışmaya devam etmeli.",
+    "Endpoint davranışı için testler eklenmeli.",
     "./mvnw test başarılı olmalı.",
     "./mvnw clean package başarılı olmalı."
   ]

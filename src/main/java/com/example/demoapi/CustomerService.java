@@ -13,7 +13,13 @@ public class CustomerService {
     private final AtomicLong idSequence = new AtomicLong();
     private final Map<Long, CustomerResponse> customers = new ConcurrentHashMap<>();
 
-    public CustomerResponse create(CustomerCreateRequest request) {
+    public synchronized CustomerResponse create(CustomerCreateRequest request) {
+        boolean emailExists = customers.values().stream()
+                .anyMatch(customer -> customer.email().equalsIgnoreCase(request.email()));
+        if (emailExists) {
+            throw new DuplicateCustomerEmailException(request.email());
+        }
+
         long id = idSequence.incrementAndGet();
         CustomerResponse customer = new CustomerResponse(
                 id,

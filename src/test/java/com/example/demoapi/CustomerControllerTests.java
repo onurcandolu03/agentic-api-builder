@@ -6,6 +6,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -23,7 +24,7 @@ class CustomerControllerTests {
 
     @Test
     void createsCustomer() throws Exception {
-        mockMvc.perform(post("/customers")
+        MvcResult result = mockMvc.perform(post("/customers")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -33,18 +34,71 @@ class CustomerControllerTests {
                                 }
                                 """))
                 .andExpect(status().isCreated())
-                .andExpect(header().string("Location", "/customers/1"))
-                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(header().exists("Location"))
+                .andExpect(jsonPath("$.id").isNumber())
                 .andExpect(jsonPath("$.firstName").value("Onur"))
                 .andExpect(jsonPath("$.lastName").value("Can"))
-                .andExpect(jsonPath("$.email").value("onur@example.com"));
+                .andExpect(jsonPath("$.email").value("onur@example.com"))
+                .andReturn();
 
-        mockMvc.perform(get("/customers/1"))
+        String customerLocation = result.getResponse().getHeader("Location");
+        long customerId = customerId(customerLocation);
+
+        mockMvc.perform(get(customerLocation))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.id").value(customerId))
                 .andExpect(jsonPath("$.firstName").value("Onur"))
                 .andExpect(jsonPath("$.lastName").value("Can"))
                 .andExpect(jsonPath("$.email").value("onur@example.com"));
+    }
+
+    @Test
+    void rejectsDuplicateEmailWithoutChangingCustomerOrConsumingId() throws Exception {
+        MvcResult firstResult = mockMvc.perform(post("/customers")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "firstName": "Ada",
+                                  "lastName": "Lovelace",
+                                  "email": "unique@example.com"
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(header().exists("Location"))
+                .andReturn();
+
+        String firstLocation = firstResult.getResponse().getHeader("Location");
+        long firstId = customerId(firstLocation);
+
+        mockMvc.perform(post("/customers")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "firstName": "Changed",
+                                  "lastName": "Customer",
+                                  "email": "UNIQUE@EXAMPLE.COM"
+                                }
+                                """))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(get(firstLocation))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(firstId))
+                .andExpect(jsonPath("$.firstName").value("Ada"))
+                .andExpect(jsonPath("$.lastName").value("Lovelace"))
+                .andExpect(jsonPath("$.email").value("unique@example.com"));
+
+        mockMvc.perform(post("/customers")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "firstName": "Grace",
+                                  "lastName": "Hopper",
+                                  "email": "next@example.com"
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Location", "/customers/" + (firstId + 1)));
     }
 
     @Test
@@ -104,5 +158,9 @@ class CustomerControllerTests {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isBadRequest());
+    }
+
+    private long customerId(String location) {
+        return Long.parseLong(location.substring(location.lastIndexOf('/') + 1));
     }
 }
