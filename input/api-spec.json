@@ -1,0 +1,75 @@
+{
+  "operationName": "createCustomer",
+  "httpMethod": "POST",
+  "path": "/customers",
+  "description": "Yeni müşteri oluşturur.",
+  "requestSchema": {
+    "type": "object",
+    "fields": {
+      "firstName": {
+        "type": "string",
+        "required": true,
+        "minLength": 2
+      },
+      "lastName": {
+        "type": "string",
+        "required": true,
+        "minLength": 2
+      },
+      "email": {
+        "type": "string",
+        "required": true,
+        "format": "email"
+      }
+    }
+  },
+  "responseSchema": {
+    "type": "object",
+    "fields": {
+      "id": {
+        "type": "long"
+      },
+      "firstName": {
+        "type": "string"
+      },
+      "lastName": {
+        "type": "string"
+      },
+      "email": {
+        "type": "string"
+      }
+    }
+  },
+  "validationRules": [
+    "firstName boş olamaz ve en az 2 karakter olmalı.",
+    "lastName boş olamaz ve en az 2 karakter olmalı.",
+    "email boş olamaz ve geçerli email formatında olmalı."
+  ],
+  "expectedStatusCodes": [
+    {
+      "status": 201,
+      "name": "CREATED",
+      "description": "Başarılı oluşturma."
+    },
+    {
+      "status": 400,
+      "name": "BAD_REQUEST",
+      "description": "Validation hatası."
+    }
+  ],
+  "businessRules": [
+    "Şimdilik gerçek database kullanılmayacak.",
+    "Oluşturulan müşteri memory içinde temsil edilebilir.",
+    "id değeri deterministic şekilde üretilmeli veya basit sabit test değeri kullanılmalı."
+  ],
+  "persistenceRequired": false,
+  "externalServiceRequired": false,
+  "acceptanceCriteria": [
+    "POST /customers valid request ile 201 dönmeli.",
+    "Response JSON tanımlanan alanları içermeli.",
+    "Invalid request 400 dönmeli.",
+    "Endpoint için test yazılmalı.",
+    "./mvnw test başarılı olmalı.",
+    "./mvnw clean package başarılı olmalı."
+  ]
+}
