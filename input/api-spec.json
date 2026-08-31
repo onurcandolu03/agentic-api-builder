@@ -1,141 +1,134 @@
 {
-  "operationName": "createCustomerWithUniqueEmail",
-  "httpMethod": "POST",
-  "path": "/customers",
-  "description": "Benzersiz email adresi ile yeni müşteri oluşturur.",
+  "operationName": "deleteCustomerById",
+  "httpMethod": "DELETE",
+  "path": "/customers/{id}",
+  "description": "Mevcut memory-based customer yapısını kullanarak ID ile müşteri siler.",
   "requestSchema": {
     "type": "object",
-    "fields": {
-      "firstName": {
-        "type": "string",
+    "pathParameters": {
+      "id": {
+        "type": "long",
         "required": true,
-        "minLength": 2
-      },
-      "lastName": {
-        "type": "string",
-        "required": true,
-        "minLength": 2
-      },
-      "email": {
-        "type": "string",
-        "required": true,
-        "format": "email"
+        "minimum": 1
       }
     }
   },
   "responseSchema": {
-    "type": "object",
-    "fields": {
-      "id": {
-        "type": "long"
-      },
-      "firstName": {
-        "type": "string"
-      },
-      "lastName": {
-        "type": "string"
-      },
-      "email": {
-        "type": "string"
-      }
-    }
+    "type": "none",
+    "description": "Başarılı silme yanıtı body içermez."
   },
   "validationRules": [
-    "firstName boş olamaz ve en az 2 karakter olmalı.",
-    "lastName boş olamaz ve en az 2 karakter olmalı.",
-    "email boş olamaz ve geçerli email formatında olmalı."
+    "id long olmalı.",
+    "id 1 veya daha büyük olmalı."
   ],
   "expectedStatusCodes": [
     {
-      "status": 201,
-      "name": "CREATED",
-      "description": "Müşteri başarıyla oluşturuldu."
+      "status": 204,
+      "name": "NO_CONTENT",
+      "description": "Müşteri başarıyla silindi."
     },
     {
       "status": 400,
       "name": "BAD_REQUEST",
-      "description": "Request validation başarısız."
+      "description": "ID geçersiz."
     },
     {
-      "status": 409,
-      "name": "CONFLICT",
-      "description": "Aynı email adresine sahip müşteri zaten mevcut."
+      "status": 404,
+      "name": "NOT_FOUND",
+      "description": "Müşteri bulunamadı."
     }
   ],
   "businessRules": [
     {
       "id": "BR-01",
-      "description": "Email adresi müşteri kayıtları arasında benzersiz olmalı.",
+      "description": "Silme işlemi mevcut CustomerController, CustomerService ve memory storage kullanılarak uygulanmalı; yeni service, repository veya storage implementation oluşturulmamalı.",
       "mandatory": true,
       "parameters": {
-        "field": "email",
-        "scope": "customerRecords",
-        "failureStatus": 409
-      }
-    },
-    {
-      "id": "BR-02",
-      "description": "Aynı email adresiyle ikinci müşteri oluşturulmamalı.",
-      "mandatory": true,
-      "parameters": {
-        "operation": "createCustomer",
-        "onDuplicate": "REJECT",
-        "failureStatus": 409
-      }
-    },
-    {
-      "id": "BR-03",
-      "description": "Duplicate email kontrolü mevcut CustomerService ve mevcut memory storage kullanılarak yapılmalı.",
-      "mandatory": true,
-      "parameters": {
-        "service": "CustomerService",
-        "storage": "existingMemoryStorage"
-      }
-    },
-    {
-      "id": "BR-04",
-      "description": "Duplicate kontrolü case-insensitive olmalı.",
-      "mandatory": true,
-      "parameters": {
-        "field": "email",
-        "caseSensitive": false
-      }
-    },
-    {
-      "id": "BR-05",
-      "description": "Duplicate email durumunda yeni ID üretilmemeli.",
-      "mandatory": true,
-      "parameters": {
-        "consumeIdentifierOnFailure": false
-      }
-    },
-    {
-      "id": "BR-06",
-      "description": "Duplicate email durumunda mevcut müşteri kaydı değiştirilmemeli.",
-      "mandatory": true,
-      "parameters": {
-        "modifyExistingRecordOnFailure": false
-      }
-    },
-    {
-      "id": "BR-07",
-      "description": "Yeni repository, yeni storage implementasyonu veya yeni customer service oluşturulmamalı.",
-      "mandatory": true,
-      "parameters": {
+        "componentsToReuse": [
+          "CustomerController",
+          "CustomerService"
+        ],
+        "storage": "existingMemoryStorage",
+        "extensionAllowed": true,
         "mustNotCreate": [
+          "customerService",
           "repository",
-          "storageImplementation",
-          "customerService"
+          "storageImplementation"
         ]
       }
     },
     {
-      "id": "BR-08",
+      "id": "BR-02",
+      "description": "Customer mevcutsa memory storage içinden silinmeli ve 204 NO_CONTENT dönmeli.",
+      "mandatory": true,
+      "parameters": {
+        "lookupField": "id",
+        "onFound": "DELETE",
+        "successStatus": 204,
+        "responseBody": false
+      }
+    },
+    {
+      "id": "BR-03",
+      "description": "Customer bulunamazsa 404 NOT_FOUND dönmeli.",
+      "mandatory": true,
+      "parameters": {
+        "onMissing": "NOT_FOUND",
+        "failureStatus": 404
+      }
+    },
+    {
+      "id": "BR-04",
+      "description": "Silinen customer daha sonra GET /customers/{id} ile istendiğinde 404 NOT_FOUND dönmeli.",
+      "mandatory": true,
+      "parameters": {
+        "afterDelete": {
+          "httpMethod": "GET",
+          "path": "/customers/{id}",
+          "expectedStatus": 404
+        }
+      }
+    },
+    {
+      "id": "BR-05",
+      "description": "Mevcut POST /customers davranışı korunmalı.",
+      "mandatory": true,
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "/customers",
+        "preserveExistingBehavior": true
+      }
+    },
+    {
+      "id": "BR-06",
+      "description": "Mevcut duplicate-email kontrolü ve 409 CONFLICT davranışı korunmalı.",
+      "mandatory": true,
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "/customers",
+        "field": "email",
+        "caseSensitive": false,
+        "duplicateStatus": 409,
+        "preserveExistingBehavior": true
+      }
+    },
+    {
+      "id": "BR-07",
       "description": "Mevcut GET /customers/{id} davranışı korunmalı.",
       "mandatory": true,
       "parameters": {
         "httpMethod": "GET",
         "path": "/customers/{id}",
+        "preserveExistingBehavior": true
+      }
+    },
+    {
+      "id": "BR-08",
+      "description": "Mevcut GET /hello davranışı korunmalı.",
+      "mandatory": true,
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "/hello",
         "preserveExistingBehavior": true
       }
     }
@@ -145,55 +138,55 @@
   "acceptanceCriteria": [
     {
       "id": "AC-01",
-      "criterion": "İlk geçerli POST /customers isteği 201 CREATED dönmeli.",
+      "criterion": "Mevcut customer için DELETE /customers/{id} 204 NO_CONTENT dönmeli.",
       "mandatory": true,
       "preferredVerificationMethod": "AUTOMATED_TEST"
     },
     {
       "id": "AC-02",
-      "criterion": "Aynı email ile ikinci POST /customers isteği 409 CONFLICT dönmeli.",
+      "criterion": "Geçersiz id için DELETE /customers/{id} 400 BAD_REQUEST dönmeli.",
       "mandatory": true,
       "preferredVerificationMethod": "AUTOMATED_TEST"
     },
     {
       "id": "AC-03",
-      "criterion": "Email karşılaştırması case-insensitive olmalı.",
+      "criterion": "Bulunamayan customer için DELETE /customers/{id} 404 NOT_FOUND dönmeli.",
       "mandatory": true,
       "preferredVerificationMethod": "AUTOMATED_TEST"
     },
     {
       "id": "AC-04",
-      "criterion": "Duplicate istekte yeni müşteri oluşturulmamalı.",
+      "criterion": "Silinen customer daha sonra GET /customers/{id} ile istendiğinde 404 NOT_FOUND dönmeli.",
       "mandatory": true,
       "preferredVerificationMethod": "AUTOMATED_TEST"
     },
     {
       "id": "AC-05",
-      "criterion": "Duplicate istekte yeni ID tüketilmemeli.",
+      "criterion": "Mevcut POST /customers davranışı çalışmaya devam etmeli.",
       "mandatory": true,
       "preferredVerificationMethod": "AUTOMATED_TEST"
     },
     {
       "id": "AC-06",
-      "criterion": "Validation hataları 400 BAD_REQUEST dönmeye devam etmeli.",
+      "criterion": "Mevcut duplicate-email kontrolü ve 409 CONFLICT davranışı çalışmaya devam etmeli.",
       "mandatory": true,
       "preferredVerificationMethod": "AUTOMATED_TEST"
     },
     {
       "id": "AC-07",
-      "criterion": "Mevcut GET /customers/{id} çalışmaya devam etmeli.",
+      "criterion": "Mevcut GET /customers/{id} davranışı çalışmaya devam etmeli.",
       "mandatory": true,
       "preferredVerificationMethod": "AUTOMATED_TEST"
     },
     {
       "id": "AC-08",
-      "criterion": "Mevcut GET /hello çalışmaya devam etmeli.",
+      "criterion": "Mevcut GET /hello davranışı çalışmaya devam etmeli.",
       "mandatory": true,
       "preferredVerificationMethod": "AUTOMATED_TEST"
     },
     {
       "id": "AC-09",
-      "criterion": "Endpoint davranışı için testler eklenmeli.",
+      "criterion": "DELETE endpoint davranışı için testler eklenmeli veya mevcut testler uygun şekilde genişletilmeli.",
       "mandatory": true,
       "preferredVerificationMethod": "STATIC_INSPECTION"
     },
@@ -201,7 +194,7 @@
       "id": "AC-10",
       "criterion": "./mvnw test başarılı olmalı.",
       "mandatory": true,
-      "preferredVerificationMethod": "AUTOMATED_TEST"
+      "preferredVerificationMethod": "COMMAND"
     },
     {
       "id": "AC-11",

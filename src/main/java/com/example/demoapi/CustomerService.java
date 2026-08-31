@@ -34,4 +34,8 @@ public class CustomerService {
     public Optional<CustomerResponse> findById(long id) {
         return Optional.ofNullable(customers.get(id));
     }
+
+    public boolean deleteById(long id) {
+        return customers.remove(id) != null;
+    }
 }

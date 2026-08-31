@@ -8,6 +8,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -50,6 +51,49 @@ class CustomerControllerTests {
                 .andExpect(jsonPath("$.firstName").value("Onur"))
                 .andExpect(jsonPath("$.lastName").value("Can"))
                 .andExpect(jsonPath("$.email").value("onur@example.com"));
+    }
+
+    // AC-01, AC-04; BR-02, BR-04
+    @Test
+    void deletesExistingCustomer() throws Exception {
+        MvcResult createResult = mockMvc.perform(post("/customers")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "firstName": "Delete",
+                                  "lastName": "Customer",
+                                  "email": "delete@example.com"
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(header().exists("Location"))
+                .andReturn();
+
+        String customerLocation = createResult.getResponse().getHeader("Location");
+
+        mockMvc.perform(delete(customerLocation))
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+
+        mockMvc.perform(get(customerLocation))
+                .andExpect(status().isNotFound());
+    }
+
+    // AC-02
+    @Test
+    void rejectsInvalidDeleteId() throws Exception {
+        mockMvc.perform(delete("/customers/0"))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(delete("/customers/not-a-number"))
+                .andExpect(status().isBadRequest());
+    }
+
+    // AC-03; BR-03
+    @Test
+    void returnsNotFoundWhenDeletingUnknownCustomer() throws Exception {
+        mockMvc.perform(delete("/customers/999998"))
+                .andExpect(status().isNotFound());
     }
 
     @Test
