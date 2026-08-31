@@ -9,10 +9,10 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.example</groupId>
-    <artifactId>demo-api</artifactId>
+    <artifactId>agentic-api-builder</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>demo-api</name>
-    <description>demo-api</description>
+    <name>Agentic API Builder</name>
+    <description>An agent-driven workflow that turns structured API specifications into validated Spring Boot implementations.</description>
     <url/>
     <licenses>
         <license/>
