@@ -63,28 +63,151 @@
     }
   ],
   "businessRules": [
-    "Email adresi müşteri kayıtları arasında benzersiz olmalı.",
-    "Aynı email adresiyle ikinci müşteri oluşturulmamalı.",
-    "Duplicate email kontrolü mevcut CustomerService ve mevcut memory storage kullanılarak yapılmalı.",
-    "Duplicate kontrolü case-insensitive olmalı.",
-    "Duplicate email durumunda yeni ID üretilmemeli.",
-    "Duplicate email durumunda mevcut müşteri kaydı değiştirilmemeli.",
-    "Yeni repository, yeni storage implementasyonu veya yeni customer service oluşturulmamalı.",
-    "Mevcut GET /customers/{id} davranışı korunmalı."
+    {
+      "id": "BR-01",
+      "description": "Email adresi müşteri kayıtları arasında benzersiz olmalı.",
+      "mandatory": true,
+      "parameters": {
+        "field": "email",
+        "scope": "customerRecords",
+        "failureStatus": 409
+      }
+    },
+    {
+      "id": "BR-02",
+      "description": "Aynı email adresiyle ikinci müşteri oluşturulmamalı.",
+      "mandatory": true,
+      "parameters": {
+        "operation": "createCustomer",
+        "onDuplicate": "REJECT",
+        "failureStatus": 409
+      }
+    },
+    {
+      "id": "BR-03",
+      "description": "Duplicate email kontrolü mevcut CustomerService ve mevcut memory storage kullanılarak yapılmalı.",
+      "mandatory": true,
+      "parameters": {
+        "service": "CustomerService",
+        "storage": "existingMemoryStorage"
+      }
+    },
+    {
+      "id": "BR-04",
+      "description": "Duplicate kontrolü case-insensitive olmalı.",
+      "mandatory": true,
+      "parameters": {
+        "field": "email",
+        "caseSensitive": false
+      }
+    },
+    {
+      "id": "BR-05",
+      "description": "Duplicate email durumunda yeni ID üretilmemeli.",
+      "mandatory": true,
+      "parameters": {
+        "consumeIdentifierOnFailure": false
+      }
+    },
+    {
+      "id": "BR-06",
+      "description": "Duplicate email durumunda mevcut müşteri kaydı değiştirilmemeli.",
+      "mandatory": true,
+      "parameters": {
+        "modifyExistingRecordOnFailure": false
+      }
+    },
+    {
+      "id": "BR-07",
+      "description": "Yeni repository, yeni storage implementasyonu veya yeni customer service oluşturulmamalı.",
+      "mandatory": true,
+      "parameters": {
+        "mustNotCreate": [
+          "repository",
+          "storageImplementation",
+          "customerService"
+        ]
+      }
+    },
+    {
+      "id": "BR-08",
+      "description": "Mevcut GET /customers/{id} davranışı korunmalı.",
+      "mandatory": true,
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "/customers/{id}",
+        "preserveExistingBehavior": true
+      }
+    }
   ],
   "persistenceRequired": false,
   "externalServiceRequired": false,
   "acceptanceCriteria": [
-    "İlk geçerli POST /customers isteği 201 CREATED dönmeli.",
-    "Aynı email ile ikinci POST /customers isteği 409 CONFLICT dönmeli.",
-    "Email karşılaştırması case-insensitive olmalı.",
-    "Duplicate istekte yeni müşteri oluşturulmamalı.",
-    "Duplicate istekte yeni ID tüketilmemeli.",
-    "Validation hataları 400 BAD_REQUEST dönmeye devam etmeli.",
-    "Mevcut GET /customers/{id} çalışmaya devam etmeli.",
-    "Mevcut GET /hello çalışmaya devam etmeli.",
-    "Endpoint davranışı için testler eklenmeli.",
-    "./mvnw test başarılı olmalı.",
-    "./mvnw clean package başarılı olmalı."
+    {
+      "id": "AC-01",
+      "criterion": "İlk geçerli POST /customers isteği 201 CREATED dönmeli.",
+      "mandatory": true,
+      "preferredVerificationMethod": "AUTOMATED_TEST"
+    },
+    {
+      "id": "AC-02",
+      "criterion": "Aynı email ile ikinci POST /customers isteği 409 CONFLICT dönmeli.",
+      "mandatory": true,
+      "preferredVerificationMethod": "AUTOMATED_TEST"
+    },
+    {
+      "id": "AC-03",
+      "criterion": "Email karşılaştırması case-insensitive olmalı.",
+      "mandatory": true,
+      "preferredVerificationMethod": "AUTOMATED_TEST"
+    },
+    {
+      "id": "AC-04",
+      "criterion": "Duplicate istekte yeni müşteri oluşturulmamalı.",
+      "mandatory": true,
+      "preferredVerificationMethod": "AUTOMATED_TEST"
+    },
+    {
+      "id": "AC-05",
+      "criterion": "Duplicate istekte yeni ID tüketilmemeli.",
+      "mandatory": true,
+      "preferredVerificationMethod": "AUTOMATED_TEST"
+    },
+    {
+      "id": "AC-06",
+      "criterion": "Validation hataları 400 BAD_REQUEST dönmeye devam etmeli.",
+      "mandatory": true,
+      "preferredVerificationMethod": "AUTOMATED_TEST"
+    },
+    {
+      "id": "AC-07",
+      "criterion": "Mevcut GET /customers/{id} çalışmaya devam etmeli.",
+      "mandatory": true,
+      "preferredVerificationMethod": "AUTOMATED_TEST"
+    },
+    {
+      "id": "AC-08",
+      "criterion": "Mevcut GET /hello çalışmaya devam etmeli.",
+      "mandatory": true,
+      "preferredVerificationMethod": "AUTOMATED_TEST"
+    },
+    {
+      "id": "AC-09",
+      "criterion": "Endpoint davranışı için testler eklenmeli.",
+      "mandatory": true,
+      "preferredVerificationMethod": "STATIC_INSPECTION"
+    },
+    {
+      "id": "AC-10",
+      "criterion": "./mvnw test başarılı olmalı.",
+      "mandatory": true,
+      "preferredVerificationMethod": "AUTOMATED_TEST"
+    },
+    {
+      "id": "AC-11",
+      "criterion": "./mvnw clean package başarılı olmalı.",
+      "mandatory": true,
+      "preferredVerificationMethod": "BUILD"
+    }
   ]
 }
