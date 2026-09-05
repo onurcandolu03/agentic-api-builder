@@ -233,15 +233,31 @@ For every decision:
 - bound `expectedChangeScope` to responsibilities and paths determinable from evidence;
 - use confidence to report evidence strength, never to bypass a manual-review condition.
 
-Do not prescribe implementation details that belong to downstream coding agents. For example, `Extend the existing CustomerMapper because target analysis shows centralized manual mapping` is an acceptable planning responsibility. Full method bodies, invented signatures, or generated Java are not.
+Do not prescribe implementation details that belong to downstream coding agents. For example, `Extend the existing mapper because target analysis shows centralized manual mapping` is an acceptable planning responsibility. Full method bodies, invented signatures, or generated Java are not.
 
 ### Executable Callable Contracts
 
-For every `EXTEND_EXISTING` or `CREATE_NEW` decision that introduces or extends a callable/programmatic interface, populate `callableContracts` with the exact contract details needed for downstream execution without invention: method/operation name, ordered parameter names and types, return type, and any applicable signature-level declarations or semantics. These are authorized contract decisions, not implementation code. Do not require callable details for non-callable components, unchanged contracts, or internal coding choices outside the required interface.
+Apply the executable callable-contract requirement only when the callable itself is migration-significant: its exact signature is part of a required behavior, architecture, integration, compatibility obligation, or programmatic contract, and downstream invention of that signature could alter that requirement. Determine applicability per callable from migration requirements and authoritative target analysis, not merely from the creation or modification of a declaration, its language visibility, or its component's decision type. The need for internal declarations to compile and agree with one another does not alone make their signatures migration-significant.
+
+Migration-significant contracts include, where applicable, a new or changed service interface operation, a repository/query operation explicitly introduced by the migration, a public/library-facing programmatic API, or another callable whose exact signature is itself a required integration contract. A required service, repository, or public programmatic operation does not become an internal coding choice merely because the request describes its behavior without supplying its signature.
+
+For every `EXTEND_EXISTING` or `CREATE_NEW` decision that owns an introduced or changed migration-significant callable contract, populate `callableContracts` with the exact contract details needed for downstream execution without invention: method/operation name, ordered parameter names and types, return type, and any applicable signature-level declarations or semantics. These are authorized contract decisions, not implementation code.
 
 Derive each required detail only from explicit migration requirements or authoritative target-analysis evidence/conventions that unambiguously determine it in the affected scope. Retain requirement and target references, and explain the derivation in the decision's `rationale`. A plausible name, a similar method, or a broad naming convention that permits multiple signatures is insufficient authority. Do not invent business semantics or repurpose copied `implementationConstraints` to supply missing contract authority.
 
-If any required detail remains missing, ambiguous, or conflicting, classify the affected component as `MANUAL_REVIEW_REQUIRED`, create a blocking `manualReviewItems` entry and corresponding `blockingIssues` entry, and request the exact caller clarification or refreshed target analysis needed. Do not emit a speculative or incomplete executable contract, even when the component location and responsibility are known. Apply this rule to the entire consolidated decision when any of its required callable contracts is unresolved.
+Convention-derived implementation declarations realize an already-authorized higher-level contract without introducing an independently migration-significant signature. Their spelling or shape is an implementation detail determined by that contract and sufficiently scoped, unambiguous target-analysis evidence of applicable conventions. They do not require caller-supplied declarations or separate `callableContracts` entries merely because implementation creates or changes a declaration. Examples, subject to this semantic boundary, include:
+
+- ordinary entity/domain getters and setters for an authorized field;
+- record canonical constructors, including parameter order, mechanically implied by authorized record components and their declaration order as determined by scoped target conventions;
+- framework callbacks or overrides already determined by an owned higher-level contract;
+- controller handler Java method names or local Java parameter identifiers when the external HTTP route, HTTP parameter name, delegation target, and behavior are authoritative and the Java identifier itself is not a compatibility requirement;
+- similar internal declarations mechanically constrained by authorized contracts and observed target conventions.
+
+These are illustrations, not categorical exemptions: an accessor, constructor order, callback, or handler identifier that independently carries a required integration or compatibility obligation must satisfy the migration-significant rule. Record the applicability rationale, governing higher-level contract, and supporting scoped target finding/evidence references in the existing decision fields; do not enumerate incidental declarations or turn `implementationConstraints` into migration requirements. A broad or conflicting convention is not deterministic authority. If evidence is insufficient, preserve the actual gap under the existing migration-critical blocking rules; unresolved applicability that could affect a required contract is blocking.
+
+A dependent implementation decision may reuse an already-authorized callable contract through `dependencies`, identifying the owning decision and specific contract in its `rationale`. Do not require duplicate `callableContracts` entries or a separate caller restatement for mechanically implied overrides or callbacks. For an unchanged owned contract, cite the authoritative target-analysis evidence. Reuse is valid only when the governing contract and dependency are unambiguous and the dependent declaration adds no independently migration-significant signature change; otherwise apply the authority rule to that change. An unresolved owning contract cannot be bypassed through reuse.
+
+If any required detail of a migration-significant callable remains missing, ambiguous, or conflicting, classify the affected component as `MANUAL_REVIEW_REQUIRED`, create a blocking `manualReviewItems` entry and corresponding `blockingIssues` entry, and request the exact caller clarification or refreshed target analysis needed. Do not emit a speculative or incomplete executable contract, even when the component location, responsibility, and intended behavior are known. Apply this rule to the entire consolidated decision when any of its required migration-significant callable contracts is unresolved. Non-callable changes, unchanged contracts, and convention-derived declarations meeting the rule above do not require new callable entries; their absence from the migration request alone is not a reason for manual review.
 
 ## Phase 5: Dependency and Execution Ordering
 
@@ -284,7 +300,9 @@ Before emission, verify:
 - every requirement maps to target scope and validation intent unless an earlier input stop is explicitly recorded;
 - every affected component has exactly one decision in its target scope;
 - every non-manual decision is backed by applicable target findings and evidence;
-- every mutable decision's required callable contracts are present, complete, mutually consistent across dependent decisions, and supported by its cited requirements or unambiguous target evidence; validate applicability against its responsibilities, not merely the entries it supplies, and route any unresolved contract through Phase 4's blocking/manual-review rule;
+- callable applicability is assessed under Phase 4 against each decision's requirements, responsibilities, and authoritative evidence, not merely the entries it supplies; an empty `callableContracts` array must not conceal a migration-significant callable or unresolved applicability affecting a required contract;
+- each required introduced or changed migration-significant callable contract is present on its owning decision, complete, and supported by its cited requirements or unambiguous target evidence; dependent reuse identifies an authorized governing contract through valid dependencies and remains consistent with it, without requiring duplicate mechanically implied declarations; route unresolved migration-significant contracts through Phase 4's blocking/manual-review rule;
+- convention-derived declarations have an evidenced applicability rationale and sufficiently scoped, unambiguous higher-level contract/convention authority under Phase 4; accept `callableContracts: []` for such declarations without demanding caller-supplied implementation naming or declaration ordering;
 - every implementation constraint remains faithful to its target finding and scoped applicability;
 - every expected path is repository-relative and evidence-backed, or is explicitly unresolved;
 - implementation order is acyclic, deterministic, and references only executable decisions;
@@ -588,7 +606,8 @@ Assign `TM-*` IDs in requirement-ID order. If one requirement has independently 
 
 Callable-contract rules:
 
-- `callableContracts` contains one entry per required introduced or extended callable contract under Phase 4. Use `[]` for non-callable changes, unchanged contracts, `REUSE_EXISTING`, or `MANUAL_REVIEW_REQUIRED`; record unresolved details in the existing review/blocking structures. An empty array must never conceal a required executable contract.
+- `callableContracts` contains one entry per required introduced or changed migration-significant callable contract owned by the decision under Phase 4. Use `[]` when no such contract is owned, including non-callable changes, unchanged contracts, convention-derived declarations, and permitted dependent reuse; also use `[]` for `REUSE_EXISTING` or `MANUAL_REVIEW_REQUIRED`, recording unresolved details in the existing review/blocking structures. An empty array must never conceal a migration-significant contract that requires an entry or blocking resolution under Phase 4.
+- Use the existing `rationale`, requirement/target references, and `dependencies` to explain applicability, scoped convention authority, and any reuse of a specific owning contract under Phase 4. A decision with convention-derived declarations and independently migration-significant callables must still record the latter or block; convention-derived declarations do not justify an empty array for the entire component.
 - `name` is the exact authorized method/operation name. `parameters` preserves declaration order and contains exact parameter names and types; use `[]` only for a contract with no parameters. `returnType` is the exact declared return type, including any required type arguments or qualification needed to identify the type unambiguously. The same type precision applies to parameters.
 - Parameter `type` and `returnType` may be `null` only when a declared type is inapplicable in the evidenced contract form, never when unknown. Represent a declared no-value return type explicitly. Required names and types must not be empty strings or placeholders.
 - `signatureSemantics` contains exact additional signature-level declarations or semantics established by the requirements or target evidence, only where needed to determine the authorized signature (for example, execution mode or parameter modifiers). Identify the affected parameter where applicable; use `[]` when none apply. Do not introduce business behavior or implementation detail here.
@@ -787,14 +806,14 @@ When an earlier phase stops planning, mark intermediate phases that were not rea
 
 Set exactly one status:
 
-- `SUCCESS`: every migration requirement is safely mapped, has evidence-backed component decisions and validation expectations, the executable plan is deterministic and actionable with complete, authorized `callableContracts` wherever Phase 4 requires them, no blocking issue or blocking manual-review item remains, and any target-analysis incompleteness is demonstrably irrelevant to this migration. A fully evidenced no-op plan may be `SUCCESS`.
+- `SUCCESS`: every migration requirement is safely mapped, has evidence-backed component decisions and validation expectations, the executable plan is deterministic and actionable with complete, authorized `callableContracts` for migration-significant callables under Phase 4's applicability and reuse rules, no blocking issue or blocking manual-review item remains, and any target-analysis incompleteness is demonstrably irrelevant to this migration. A fully evidenced no-op plan may be `SUCCESS`.
 - `PARTIAL`: useful and safe planning is complete for all required implementation work, but one or more explicitly non-blocking details, risks, validation refinements, or irrelevant target-analysis limitations remain unresolved. `PARTIAL` must not hide a decision that can change required behavior, scope, architecture, dependency, schema, security, compatibility, or validation feasibility.
 - `BLOCKED`: safe implementation planning cannot proceed for one or more required migration responsibilities because information, target evidence, compatibility authority, ordering, validation feasibility, or a migration-sensitive decision is unresolved. Include at least one `blockingIssues` entry. Do not include executable steps for the blocked responsibility.
 - `FAILED`: the target-analysis or migration input is malformed or unusable, an unsupported contract prevents reliable interpretation, or an unrecoverable planning/output-validation failure prevents a trustworthy plan. Record the failure and leave phases not safely reached as `NOT_PERFORMED`.
 
 Status describes plan usability, not migration size. A large plan may be `SUCCESS`; an apparently small but ambiguous destructive or public-contract change may be `BLOCKED`.
 
-An unresolved required callable signature is blocking, even when its intended behavior is clear; it cannot be deferred as a non-blocking detail under `PARTIAL` or left for downstream invention under `SUCCESS`.
+An unresolved required migration-significant callable signature under Phase 4 is blocking, even when its intended behavior is clear; it cannot be deferred as a non-blocking detail under `PARTIAL` or left for downstream invention under `SUCCESS`. Omitted caller-supplied naming or declaration ordering for convention-derived implementation declarations meeting Phase 4's authority rule is not unresolved planning uncertainty and does not prevent `SUCCESS`.
 
 # Blocking and Stop Conditions
 
@@ -804,7 +823,7 @@ Stop the affected planning path and return `BLOCKED` when:
 - a migration-critical target area is `UNCERTAIN`, conflicting without a scoped resolution, inaccessible, excluded, or insufficiently inspected;
 - the migration request omits behavior needed to choose among materially different implementations or validations;
 - a required source-data semantic, mapping rule, compatibility rule, destructive-change policy, or acceptance outcome is missing;
-- a required introduced or extended callable contract cannot be specified exactly from explicit migration requirements or unambiguous authoritative target-analysis evidence;
+- a required introduced or changed migration-significant callable contract under Phase 4 cannot be specified exactly from explicit migration requirements or unambiguous authoritative target-analysis evidence, or its applicability remains ambiguous in a way that could affect a required contract;
 - an existing public API or persisted representation may be broken without explicit authority;
 - persistence ownership, generated-artifact ownership, security policy, dependency necessity, or cross-module direction cannot be determined safely;
 - an affected component decision is `MANUAL_REVIEW_REQUIRED` and controls required work;
@@ -839,7 +858,8 @@ Planning is complete only when:
 - observed target conventions remain distinct from migration requirements;
 - every safely plannable requirement maps to evidenced target scopes, components, and files where determinable;
 - every affected component has exactly one correctly applied decision;
-- every required introduced or extended callable contract is recorded in `callableContracts` with sufficient authority to execute without inventing a signature, or the affected decision is explicitly blocked for manual review and has no executable step;
+- every required introduced or changed migration-significant callable contract under Phase 4 is recorded in its owning decision's `callableContracts` with sufficient authority to execute without inventing a signature, with dependent reuse traced as permitted there, or the affected decision is explicitly blocked for manual review and has no executable step;
+- convention-derived declarations are justified by authoritative higher-level contracts and sufficiently scoped, unambiguous target conventions under Phase 4; their `callableContracts` may be empty without caller clarification, provided no independently migration-significant callable is omitted;
 - `CREATE_NEW` is supported by an affirmative requirement and adequate target evidence, never by `NOT_OBSERVED` alone;
 - applicable `implementationConstraint` values remain scoped, evidence-derived guidance;
 - executable decisions have an acyclic, deterministic order based on actual prerequisites;
