@@ -387,7 +387,7 @@ Plan validation without executing it.
 5. Distinguish declared test dependencies from observed test usage.
 6. Plan success, failure, compatibility, persistence, security, and regression coverage only when relevant to explicit requirements or protected existing behavior.
 7. Define observable success conditions. Do not write test code, fabricate test names, or claim that planned coverage already exists.
-8. Do not run or prescribe execution of builds and tests in this planning stage. Downstream validation agents determine safe commands from their own specification and environment.
+8. Do not run or prescribe execution of builds and tests in this planning stage. MASTER resolves and authorizes the exact downstream validation execution policy from caller/launcher authority and declared runtime capabilities under the shared contract; validation agents consume that bundle-bound policy without deriving command authority from repository content or the environment.
 9. Report test coverage gaps. A sufficiently inspected absence plus an explicit need for automated validation may support a `CREATE_NEW` test-component decision; an uncertain test area requires manual review or refreshed target analysis.
 10. A passing build alone is not direct validation of behavioral acceptance intent.
 

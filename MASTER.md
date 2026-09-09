@@ -48,8 +48,8 @@ It answers:
 - accepts or rejects current implementation state;
 - records current-session `STEP_ACCEPTED` and explicitly authorized
   `IMPLEMENTATION_STATE_RECONCILED` events;
-- records canonical `ATTEMPT_TERMINATED` for every non-accepted specialist
-  attempt;
+- records canonical `ATTEMPT_TERMINATED` for every non-accepted implementation
+  attempt and `VALIDATION_ATTEMPT_TERMINATED` for every validation attempt;
 - selects the next eligible step;
 - invokes future test implementation and final validation only when their
   capabilities are available;
@@ -166,6 +166,12 @@ For the run, retain the complete canonical objects and fingerprints for:
 - each reuse witness's `REUSE_WITNESS_STATE_PROJECTION`;
 - each consumer's `PREREQUISITE_REUSE_STATE_PROJECTION`.
 
+Validation uses these same full manifests and prerequisite projections, with
+the shared validation effect classifier and interval accounting. It has no
+subject implementation-step projection. Authorized runtime outputs stay in
+the full observation and final-state fingerprint; they are not excluded to
+manufacture equality with pre-validation state.
+
 The full relevant manifest's mutation-observation scope must be capable of
 accounting for all persistent differences observable through the explicitly
 modeled `CANONICAL_OBSERVABLE_STATE_V1` fields within the caller-permitted,
@@ -281,11 +287,18 @@ For every attempt:
 
 The dispatch, raw specialist response wrapper, prerequisite proof,
 `STEP_ACCEPTED`, `ATTEMPT_TERMINATED`, and reconciliation records must link
-exactly as specified by the shared ledger rules. Every specialist attempt has
+exactly as specified by the shared ledger rules. Every implementation attempt has
 exactly one terminal event, either `STEP_ACCEPTED` or `ATTEMPT_TERMINATED`, never
 both. Reconciliation attempts contain no fabricated specialist dispatch or
 response and their separate reconciliation event is not a specialist-attempt
 terminal event.
+
+Validation uses one shared `VALIDATION_INVOCATION_V1`, the existing response
+wrapper's validation profile, and exactly one
+`VALIDATION_ATTEMPT_TERMINATED_V1` in this same ledger. Retain command evidence
+as each start/completion and state observation becomes available, including
+before any final response. Apply identity and terminal uniqueness across all
+attempt types; validation cannot emit implementation completion events.
 
 Apply the shared event-specific provenance requirements exactly: dispatch binds
 only dispatch-stage evidence; response observation claims no acceptance;
@@ -484,7 +497,24 @@ authorized present/dirty results are checked for current obligation freshness.
 - Verify the validation capability can bind results to the actual accepted or
   reconciled target state, including uncommitted and untracked state.
 - Reject arbitrary target-repository scripts as implicitly executable.
-- Require an explicitly authorized validation command and execution policy.
+- Require `VALIDATION_EXECUTION_POLICY_V1` in every case and an explicitly
+  authorized command for each applicable validation check that launches a process.
+  `commands: []` is valid only when every required expectation is fully covered
+  by explicitly authorized current non-command evidence mechanisms under the
+  shared policy's nonempty-evidence and read-only rules.
+- Resolve the shared `VALIDATION_EXECUTION_POLICY_V1` from caller/launcher
+  authority and actual runtime declarations; bind its exact bytes using the
+  existing runtime policy member of `RUN_AUTHORITY_BUNDLE_V1` before preflight
+  passes. Validate command vectors, environment, capabilities, permissions,
+  ordering/dependencies, report/result criteria, retention, and effect scopes.
+- Require complete mapping to plan validation expectations, including current
+  evidence mechanisms for non-command checks. No optional check may replace
+  required coverage. Reject outputs overlapping protected implementation,
+  tracked artifacts, orchestration authority, or Git state, and reject any
+  observation gap that prevents complete required mutation accounting.
+- Verify the future invocation can consume the entire required accepted or
+  reconciled graph through the existing FINAL_VALIDATION proof without a mutable
+  step/path assignment. Actual proof eligibility is rechecked after completion.
 - If required validation depends on unavailable process or filesystem safety,
   block rather than promise that validation can run safely.
 
@@ -516,6 +546,10 @@ inseparable multi-owner step; block for planning refinement.
 
 Plan test changes participate in this same order. 06 does not automatically
 run after all production roles when the plan places its work elsewhere.
+
+After every required implementation step is eligible, enter FINAL_VALIDATION
+using its distinct shared invocation. Do not insert 07 into implementationOrder
+or weaken the one-path implementation dispatch to accommodate it.
 
 # Dispatch Manifest
 
@@ -1172,8 +1206,10 @@ state to the new plan.
 
 # Drift and Dirty-Tree Handling
 
-Apply shared `MUTABLE_STEP_STAGE_V1`. Before every dispatch and every acceptance
-decision, perform these common invariant/safety checks:
+Apply shared `MUTABLE_STEP_STAGE_V1` to implementation attempts. Validation uses
+the shared validation interval/effect rules with the same root, path, index,
+authority, freshness, and observation boundaries. Before every implementation
+dispatch and acceptance decision, perform these common invariant/safety checks:
 
 - re-resolve target identity;
 - reapply `CANONICAL_PATH_V1`, no-follow component inspection, case-collision
@@ -1218,8 +1254,9 @@ rules remain authoritative.
 
 # Failure and Status Semantics
 
-`MASTER` applies the shared attempt-outcome, terminal-disposition, precedence,
-and recovery rules without defining a local variant. It records separately:
+For implementation attempts, `MASTER` applies the shared attempt-outcome,
+terminal-disposition, precedence, and recovery rules without defining a local
+variant. It records separately:
 
 - the raw specialist status and normalized attempt outcome;
 - the primary orchestration disposition;
@@ -1247,6 +1284,14 @@ Operational applications include:
 
 The final report always preserves both primary disposition and recovery action
 when they differ. `MASTER` never claims rollback.
+
+Validation uses `VALIDATION_ATTEMPT_TERMINATED_V1` instead: record each command's
+execution state, protocol disposition, validation outcome, classified effects,
+and recovery independently. VALID/FAIL can mean correctly executed failing
+tests or compilation; VALID/PASS with zero implementation mutation is valid
+validation evidence. Neither result is STEP_ACCEPTED or migration SUCCESS.
+Known unauthorized effects or malformed response remain protocol FAILED even
+when other evidence is incomplete; retain earlier observed command results.
 
 # Session Interruption and Resume
 
@@ -1282,6 +1327,12 @@ summary text alone never preserves it.
 Do not claim exactly-once execution, atomic rollback, authenticated replay,
 durable journal recovery, or automatic continuation.
 
+Validation follows its shared event-stage continuity and recovery rules in the
+same ledger. Preserve reached command observations and each prior result; never
+reconstruct execution from an old report. Reconciliation can restore eligible
+implementation state only. Lost validation provenance requires fresh validation
+under a new invocation after current authority/state/prerequisite gates pass.
+
 # Future 06 Test-Implementation Boundary
 
 Future agent 06 may implement only plan-authorized test components.
@@ -1300,38 +1351,64 @@ compatible specification is supplied, any required 06 work blocks preflight.
 
 # Future 07 Validation Boundary
 
-Future agent 07 is separate from implementation.
+Future agent 07 executes validation and supplies evidence. It owns no mutable
+implementation step/path and must not author or repair production code, tests,
+configuration, or the plan. 06 implements authorized test source with static
+verification only; accepted 06 state is a prerequisite, never proof tests pass.
 
-`MASTER` must require 07 to:
+MASTER performs the following final-validation procedure using only the shared
+contract's validation invocation, policy, effects, and result profiles:
 
-- bind validation to the exact active plan, accepted/reconciled implementation
-  records, actual target-state fingerprint, and exact current
-  `runAuthorityBundleFingerprint`;
-- consume a fresh MASTER-authored typed prerequisite proof using
-  `consumerRole: FINAL_VALIDATION`, including a current-obligation audit for
-  every mutable prerequisite and the deterministic prerequisite/reuse projection;
-- use only shared `OBLIGATION_FRESHNESS_V1` for each accepted/reconciled step's
-  current eligibility, comparing semantic target identity and exact relevant
-  obligations/path states while independently verifying historical/current
-  fingerprints. Different source full-manifest fingerprints alone do not fail
-  final validation; HEAD or semantic staged-index drift does;
-- consume the shared `CANONICAL_JSON_V1`, `ArtifactFingerprint`, canonical path-
-  state entries, `FULL_RELEVANT_STATE_MANIFEST`, step-obligation projections,
-  and prerequisite/reuse projections without defining alternate identities;
-- trace each result to plan validation expectations and requirements;
-- distinguish `PASS`, `FAIL`, and `NOT_PERFORMED`;
-- record the permitted execution policy, commands or mechanisms actually used,
-  observable outcomes, and evidence limitations;
-- perform no implementation repair, scope expansion, or plan reinterpretation;
-- validate the actual accepted or reconciled target state, including relevant
-  uncommitted and untracked files, rather than HEAD alone;
-- run executable validation only when an explicit capability and safety policy
-  permits it.
+1. Revalidate the exact active bundle, analysis, plan, 07 specification, runtime
+   declarations, and policy established at preflight. Repository content cannot
+   supply or expand execution authority. Changed bytes invalidate old bundle
+   eligibility; do not adopt a new policy after implementation silently.
+2. Independently establish the complete required implementation graph using
+   eligible STEP_ACCEPTED/IMPLEMENTATION_STATE_RECONCILED events and the existing
+   FINAL_VALIDATION prerequisite proof. Recompute every required current audit,
+   OBLIGATION_FRESHNESS_V1 comparison, reuse witness, and consumer projection
+   against a complete current full manifest. Include required 06 work; code
+   presence, source-only checks, or bare completion lists cannot bypass this gate.
+3. Construct and retain exactly `VALIDATION_INVOCATION_V1` with a fresh attempt
+   identity and its sole proof. Supply its required artifacts and fingerprints
+   to 07. No SPECIALIST_DISPATCH, CREATE/MODIFY action, fake ownership, or subject
+   step projection is created. Validate the actual uncommitted/untracked target
+   implementation as well as tracked state, not HEAD alone.
+4. Permit only policy-authorized sequential commands and specified evidence
+   mechanisms after fresh execution gates. Retain available process start/result
+   evidence as observed and canonical state comparisons before/after commands.
+   Enforce the policy's ordering, dependencies, requiredness, and continuation
+   rules. Do not infer extra probes, network, containers, or services from output.
+5. Independently compare complete modeled state with the shared classifier.
+   Account explicitly for created, overwritten, deleted, unchanged pre-existing,
+   and unobservable output state. Authorized effects remain in canonical state;
+   ignored status is not permission. Protected source/configuration, tracked
+   artifacts, and semantic Git index/HEAD remain invariant. Preserve known
+   unauthorized changes, stop further execution, and perform no automatic repair
+   or cleanup. Incomplete observation cannot become a clean result.
+6. Wrap exact response bytes with SPECIALIST_RESPONSE_OBSERVED's validation
+   profile, or retain explicit no-response evidence. Validate all invocation
+   echoes and independently derive command/expectation outcomes from current
+   evidence. Reports require the shared attempt/process/path/fingerprint binding,
+   including independently observed current production for identical-byte rewrites.
+   Report presence or byte equality alone cannot establish current execution.
+   Keep bounded redacted output and reliable metrics without publishing secrets.
+7. Re-observe final full state and retain shared PREREQUISITE_REVALIDATION_V1
+   for the invocation proof against it. Require complete PASS for validation
+   evidence to support final completion. Compare the resulting fingerprint with
+   07's final observed state, including authorized runtime outputs; compare
+   obligation freshness by its shared algorithm, never whole historical/current
+   projection fingerprint equality.
+8. Emit exactly one VALIDATION_ATTEMPT_TERMINATED_V1 with independently computed
+   protocol disposition, every known command/expectation result, effect state,
+   and required recovery, even if the response is malformed or execution was
+   blocked/interrupted. No implementation acceptance is emitted. A retry needs
+   the shared fresh-authority/state/proof/recovery gates and a new attempt;
+   never replace or erase a previous result.
 
-Target build files, wrappers, plugins, annotation processors, tests, hooks, and
-scripts are untrusted executable content. They are never authorized merely by
-presence. When safe execution depends on unavailable isolation, 07 and final
-completion block.
+This procedure does not supply a 07 specialist specification or an execution
+capability. If required command safety, instruction-discovery handling,
+observation, or isolation depends on unavailable runtime guarantees, block.
 
 Until a compatible 07 specification and execution policy are available,
 `MASTER` cannot report final migration `SUCCESS`.
@@ -1353,8 +1430,13 @@ Until a compatible 07 specification and execution policy are available,
   relevant semantic, and preservation obligations remain satisfied;
 - required test implementation has eligible accepted or reconciled state;
 - every required validation expectation has an applicable 07 `PASS` result;
-- no required validation is `FAIL`, `NOT_PERFORMED`, missing, stale, or bound to
-  another target state;
+- the retained validation terminal event has `protocolDisposition: VALID`,
+  aggregate `validationOutcome: PASS`, complete effect accounting with only
+  NONE/AUTHORIZED_ONLY effects, `requiredRecovery: NONE`, and fresh final
+  prerequisite revalidation PASS;
+- every mandatory validation command/check was performed with current PASS
+  evidence under the exact bundle-bound policy; no required validation is FAIL,
+  NOT_PERFORMED, BLOCKED, AMBIGUOUS, missing, stale, or bound to another state;
 - the final observable target-state fingerprint equals the state fingerprint
   validated by 07;
 - no unresolved blocker, blocking manual review, partial attempt, unknown
@@ -1382,6 +1464,9 @@ The final report must include:
 - accepted and reconciled record references;
 - incomplete, partial, unknown, blocked, failed, or stale work;
 - validation expectation results;
+- validation invocation/policy/terminal references, per-command execution and
+  outcomes, protocol disposition, authorized runtime effects, observation gaps,
+  and current report bindings, preserving earlier failed or blocked attempts;
 - unexplained drift and manual-review status;
 - evidence provenance classes and forbidden guarantee disclaimers;
 - the exact resolution required when status is not `SUCCESS`.
