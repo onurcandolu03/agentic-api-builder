@@ -104,8 +104,9 @@ instruction compliance as external enforcement.
 9. A capability registry containing each available implementation, test, and
    validation specialist specification.
 10. Any optional caller-authorized checkpoint and reconciliation evidence.
-11. Any external runtime capability declaration the caller or launcher places
-    in scope.
+11. The shared `TARGET_INSTRUCTION_DISCOVERY_CONTROL_V1` runtime declaration
+    and its required provider evidence, plus any other external runtime
+    capability declaration the caller or launcher places in scope.
 
 If item 2 or any caller-supplied migration/source information, clarification,
 restriction, authorization, or resolution is supplied separately from the
@@ -141,6 +142,54 @@ validation eligibility under the former bundle.
 `MASTER` may run 01 and 02 as part of a new orchestration session. It must
 validate that their observed repository effects are empty and that their
 outputs conform to their specifications before accepting those outputs.
+
+# Pre-01 Instruction-Discovery Gate
+
+During `INPUT_REGISTRATION`, before 01 or any target-content access, apply the
+shared `TARGET_INSTRUCTION_DISCOVERY_CONTROL_V1` profile. Register the exact
+declaration with role `RUNTIME_CAPABILITY_DECLARATION`, retain its underlying
+provider definition/configuration/observation evidence and fingerprints outside
+the target, and bind separately supplied caller authority as `CALLER_RESOLUTION`.
+Only the shared non-discovering metadata route may establish target scope before
+this gate; if that route is unavailable, block without accessing target content.
+
+Construct and retain the shared `DISCOVERY_CONTROL_CHECK_V1` and its fingerprint.
+Apply its seven predicates in order: eligible non-target source, exact target,
+complete MASTER/01–07 profile coverage, supported control mode, observed effective
+configuration, actual invocation/launch-route correlation, and current continuity.
+`TARGET_INSTRUCTION_DISCOVERY_CONTROL_ESTABLISHED` is PASS only when all seven
+pass. A caller instruction, parent-only probe, startup cwd, target-local JSON,
+or an unsupported isolation claim cannot supply missing runtime evidence.
+Unknown specialist startup/discovery behavior blocks before 01. A malformed
+authority binding or observed discovery violation remains protocol `FAILED`
+under the shared rules; an ordinary unavailable capability is `BLOCKED`.
+
+Retain only reached pre-planning authority and observations; do not require or
+fabricate a plan, analysis, full `RUN_AUTHORITY_BUNDLE_V1`, implementation
+dispatch, or ledger attempt to pass this gate. On a pre-01 stop, report the
+failed predicate and evidence limits with later phases `NOT_PERFORMED`.
+Supply 01 and 02 the exact declaration and applicable check with fingerprints
+alongside the explicit shared contract, using the shared launch correlation
+rules. Recheck before launch, at child entry, and after each invocation before
+accepting its output; recheck all profiles before accepting the plan.
+
+When constructing the post-planning bundle, include the same accepted declaration
+in `runtimeCapabilities` with its exact capability ID/provider/fingerprint and
+null policy fingerprint. Retain the pre-01 check and evidence; subsequent checks
+bind the full active bundle. At preflight, every dispatch and acceptance, every
+validation command, and final completion, require the shared current check and
+applicable profile. Supply it and the declaration to 03–07 through the existing
+artifact delivery and fingerprint-verification split; do not add a second
+dispatch schema or response-binding field. Include the capability in validation
+policy `runtimeCapabilityIds`, including static-only validation.
+
+Use only evidenced specialist launch routes. No prompt restriction can make an
+unknown subagent context safe. Stop on changed target/configuration/context or
+lost correlation; re-establish through shared input-registration rules. A new
+post-planning declaration changes the authority bundle and invalidates old
+automatic eligibility, including final validation. This gate supplies neither
+specialist availability nor execution permission, and does not resolve other
+draft-readiness requirements.
 
 # Observable-State Manifest
 
@@ -1454,7 +1503,10 @@ The final report must include:
 
 - orchestration specification and contract versions;
 - primary status;
-- the exact current `runAuthorityBundleFingerprint`;
+- the exact current `runAuthorityBundleFingerprint` when constructed; otherwise
+  report the bundle as `NOT_CONSTRUCTED` with the retained pre-planning authority
+  and `DISCOVERY_CONTROL_CHECK_V1` fingerprint; never put a status string in an
+  `ArtifactFingerprint` field or fabricate a bundle;
 - non-secret authority fingerprints and redacted correlation references for
   any locally retained fingerprint that the shared secret rules prohibit from
   publication;
@@ -1501,9 +1553,10 @@ This draft is not executable for a full migration. Before execution:
 1. A compatible agent 06 specification and capability must be supplied.
 2. A compatible agent 07 specification, capability, and validation execution
    policy must be supplied.
-3. Launcher handling of target-repository instruction discovery must be
-   understood and safely configured, or execution must explicitly block where
-   the required instruction-isolation property cannot be established.
+3. Before 01, `TARGET_INSTRUCTION_DISCOVERY_CONTROL_ESTABLISHED` must pass the
+   shared declaration/evidence/check profile and remain current for MASTER and
+   every specialist invocation. Missing launcher or specialist guarantees block;
+   the defined protocol does not imply that the current runtime supplies them.
 
 Agents 01 through 05 now bind the shared instruction trust rule for
 MASTER-controlled invocations. Agent 02 now requires exact canonical CREATE
