@@ -144,6 +144,20 @@ exception messages are never retained or hashed for publication. This is not a
 universal secret detector. The trusted host must supply non-secret instruction
 inputs. Evidence is local current-session material and should be reviewed before
 publication; paths and model output may themselves be sensitive.
+Sensitive JSON field names carry credential context through every nested object
+and array value. Empty structure with only null or empty-string leaves does not
+by itself contain a credential value. For example,
+`{"authorization":{"callerAuthorization":{},"checkpointReference":""}}`
+is an inspectable specification shape; replacing either empty value with a
+nonempty string, number, or boolean rejects. Whitespace and named placeholders
+such as `"<redacted>"` remain ambiguous values and reject in credential context.
+Every field name and string still receives configured-credential, recognized
+secret-pattern, and decoded-fragment inspection. There is no document/path
+exemption or sensitive-key whitelist. Arbitrary unknown material disguised only
+as an ordinary field name cannot be distinguished from schema field names;
+configured or recognizable secrets in field names still reject. Independent
+prose-pattern checks remain conservative, including rejection of `password=null`
+and `{"password":null}`.
 JSON fragments in prose and markdown fences are inspected structurally, including
 quoted JSON strings, decoded Unicode keys/values, and multiple objects/arrays.
 Extraction tracks matching brackets and escaped quotes; `{placeholder}` and
@@ -178,7 +192,10 @@ This compiles the harness and runs `HarnessTest` and `SourceContractTest` in an
 isolated temporary directory. Runtime checks use mocked transports and fixture
 repositories. Contract checks parse the authoritative Markdown JSON structures,
 check normative rules and exact trusted fingerprints, and verify that variable
-caller data is representable. They do not execute source discovery or planning.
+caller data is representable. They also scan the complete current `MASTER.md`
+and freeze the actual ten-document trusted chain through the public host path,
+with transport methods that fail if called. They do not execute source discovery
+or planning.
 The script does not invoke Maven/Gradle, compile application
 sources, run project tests, execute a migration role, or call the network. Fixtures
 are created beneath `/private/tmp` when available (otherwise canonical `/tmp`),
@@ -193,11 +210,12 @@ and durable evidence storage are outside this milestone. Local readiness means
 the retained MASTER creation/readback and fresh host observations are available
 for that later review. It does not mean the discovery gate passed or E2E is ready.
 
-An offline integration probe also found that the unchanged secret scanner
-rejects the full `MASTER.md` text with `SECRET_MATERIAL_REJECTED`, both at the
-approved baseline and with this patch. Consequently the complete repository
-instruction payload currently blocks in the public host freeze path. The new
-00 specification passes that scanner independently; exact trusted-file loading
-and fingerprint checks do not claim public host acceptance. The existing
-scanner was preserved. Resolving that earlier document/scanner incompatibility
-remains necessary before a live launcher can use the complete document chain.
+The pre-existing `MASTER.md` scanner incompatibility is repaired: the old
+populated-container check rejected the empty reconciliation authorization shape
+shown above solely because its outer object contained field names. The full
+current `MASTER.md` and complete trusted chain now pass local secret inspection
+and public host freeze. Offline regression checks retain the exact instruction
+payload and verify `TRUSTED_INPUTS_FROZEN`, `protocolAcceptance: NOT_EVALUATED`,
+target access `CLOSED`, and no request, response, item, or discovery events. This
+establishes instruction/scanner compatibility only; it does not establish live
+launcher operation, discovery gate PASS, specialist execution, or E2E readiness.

@@ -42,29 +42,35 @@ final class Evidence {
 
     /** Checks selected credential field names and strings, not authenticity or universal secret detection. */
     static void inspectSecretMaterial(Object value, Consumer<String> credentialCheck) {
-        inspectSecretMaterial(value, credentialCheck, 0, new InspectionBudget());
+        inspectSecretMaterial(value, credentialCheck, 0, new InspectionBudget(), false);
     }
 
     private static void inspectSecretMaterial(Object value, Consumer<String> credentialCheck, int depth,
-                                              InspectionBudget budget) {
+                                              InspectionBudget budget, boolean credentialValue) {
         budget.visit(depth);
         if (value instanceof Map<?, ?> map) {
             for (var entry : map.entrySet()) {
                 if (!(entry.getKey() instanceof String key)) throw new IllegalArgumentException("UNINSPECTABLE_JSON_REJECTED");
                 String normalized = key.strip().replace("_", "").replace("-", "").toLowerCase(Locale.ROOT);
-                // Preserve the relationship: arrays, objects, numbers and booleans can carry credentials too.
-                if (SENSITIVE_KEYS.contains(normalized) && populated(entry.getValue()))
-                    throw new IllegalArgumentException("SECRET_MATERIAL_REJECTED");
-                inspectSecretMaterial(key, credentialCheck, depth + 1, budget);
-                inspectSecretMaterial(entry.getValue(), credentialCheck, depth + 1, budget);
+                // Field names and empty structure are not credential values. Still inspect every key,
+                // and preserve sensitive ancestry through all container values, regardless of child key.
+                inspectSecretMaterial(key, credentialCheck, depth + 1, budget, false);
+                inspectSecretMaterial(entry.getValue(), credentialCheck, depth + 1, budget,
+                        credentialValue || SENSITIVE_KEYS.contains(normalized));
             }
         } else if (value instanceof List<?> list) {
-            for (Object item : list) inspectSecretMaterial(item, credentialCheck, depth + 1, budget);
-        } else if (value instanceof String text) {
-            budget.text(text.length());
-            if (OBVIOUS_SECRET.matcher(text).find()) throw new IllegalArgumentException("SECRET_MATERIAL_REJECTED");
-            credentialCheck.accept(text);
-            inspectFragments(text, credentialCheck, depth, budget);
+            for (Object item : list) inspectSecretMaterial(item, credentialCheck, depth + 1, budget, credentialValue);
+        } else {
+            // Only null and the empty string are empty scalar placeholders. Whitespace, named
+            // placeholders, numbers and booleans remain ambiguous credential-bearing material.
+            if (credentialValue && value != null && !(value instanceof String text && text.isEmpty()))
+                throw new IllegalArgumentException("SECRET_MATERIAL_REJECTED");
+            if (value instanceof String text) {
+                budget.text(text.length());
+                if (OBVIOUS_SECRET.matcher(text).find()) throw new IllegalArgumentException("SECRET_MATERIAL_REJECTED");
+                credentialCheck.accept(text);
+                inspectFragments(text, credentialCheck, depth, budget);
+            }
         }
     }
 
@@ -86,7 +92,7 @@ final class Evidence {
             Object parsed;
             try { parsed = Json.parseValue(text.substring(start, end)); }
             catch (RuntimeException invalid) { throw new IllegalArgumentException("UNINSPECTABLE_JSON_REJECTED"); }
-            inspectSecretMaterial(parsed, credentialCheck, depth + 1, budget);
+            inspectSecretMaterial(parsed, credentialCheck, depth + 1, budget, false);
             if (opening == '"') rejectAmbiguousQuoteBoundary(text, end, budget);
             start = end - 1; // Never reparse each nested opening; traverse the decoded value instead.
         }
@@ -181,14 +187,6 @@ final class Evidence {
     private static boolean candidateSpace(char value) {
         // Recognize malformed non-JSON spacing too; the strict parser will reject it.
         return Character.isWhitespace(value) || Character.isSpaceChar(value) || Character.getType(value) == Character.FORMAT;
-    }
-
-    private static boolean populated(Object value) {
-        if (value == null) return false;
-        if (value instanceof String text) return !text.isEmpty();
-        if (value instanceof List<?> list) return !list.isEmpty();
-        if (value instanceof Map<?, ?> map) return !map.isEmpty();
-        return true;
     }
 
     void safe(String raw) {

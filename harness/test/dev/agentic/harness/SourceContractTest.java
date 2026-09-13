@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-/** Offline checks of specification schemas and normative rules; does not execute an analyst. */
+/** Offline specification and trusted-input freeze checks; does not execute an analyst. */
 public final class SourceContractTest {
     private static int passed;
 
@@ -33,8 +33,10 @@ public final class SourceContractTest {
         run("source secret output policy", () -> secretPolicy(source));
         run("shared controlled roles, bundle and source gate", () -> sharedContract(contract));
         run("actual trusted documents have exact bytes and complete profiles", () -> trustedChain(root, temp));
+        run("full current MASTER passes secret inspection", () -> masterSecretInspection(master));
+        run("full actual trusted chain freezes without dispatch or access", () -> trustedChainFreeze(root, temp));
         run("downstream fingerprint correlation includes source authority", () -> specialistBindings(root));
-        System.out.println("PASS " + passed + " source contract checks; static specifications only, no agent execution");
+        System.out.println("PASS " + passed + " source contract checks; local specifications and freeze only, no agent execution");
     }
 
     private static String read(Path root, String relative) throws Exception {
@@ -300,6 +302,69 @@ public final class SourceContractTest {
                 "05-service-api-implementation", "06-test-implementation", "07-validation", "MASTER")),
                 "canonical profile order differs deliberately from execution registry order");
         trusted.verify(target);
+    }
+
+    private static final class OfflineClient implements ResponsesClient {
+        private int dispatches;
+        private final HttpResponsesClient scanner = new HttpResponsesClient("contract-fixture-credential-92741",
+                request -> { throw new AssertionError("OFFLINE_TRANSPORT_REQUIRED"); });
+
+        private AssertionError unexpectedDispatch() {
+            dispatches++;
+            return new AssertionError("OFFLINE_TRANSPORT_REQUIRED");
+        }
+
+        @Override public String create(String body) { throw unexpectedDispatch(); }
+        @Override public String retrieve(String responseId) { throw unexpectedDispatch(); }
+        @Override public String inputItems(String responseId, String after) { throw unexpectedDispatch(); }
+        @Override public Map<String, Object> configuration() { return scanner.configuration(); }
+        @Override public void rejectCredentialMaterial(String text) { scanner.rejectCredentialMaterial(text); }
+    }
+
+    private static void masterSecretInspection(String master) {
+        var client = new OfflineClient();
+        Evidence.rejectObviousSecrets(master);
+        client.rejectCredentialMaterial(master);
+        new Evidence(client::rejectCredentialMaterial).safe(master);
+        check(client.dispatches == 0, "full MASTER inspection is strictly local");
+    }
+
+    private static void trustedChainFreeze(Path root, Path temp) throws Exception {
+        Path target = Files.createDirectory(temp.resolve("contract-freeze-target"));
+        TrustedInputs expected = TrustedInputs.freeze(root, target);
+        var client = new OfflineClient();
+        var harness = new ControlledHarness(root, target,
+                new ControlledHarness.Config("offline-contract-model-v1", 128), client);
+        harness.freezeTrustedInputs();
+        var observation = harness.inspect();
+        check("TRUSTED_INPUTS_FROZEN".equals(observation.get("state")), "actual instruction chain freezes successfully");
+        check("NOT_EVALUATED".equals(observation.get("protocolAcceptance")), "freeze provides no protocol acceptance");
+        check("CLOSED".equals(observation.get("targetAccessPhase")), "freeze grants no target access");
+        check(observation.get("targetMetadata") == null, "target metadata is not registered");
+        check("NOT_DESIGNATED".equals(observation.get("sourceAccessState")), "freeze grants no source capability");
+        check(observation.get("sourceMetadata") == null, "source metadata is not registered");
+        check(observation.get("responseId") == null && observation.get("activeRequestBody") == null,
+                "no request or response is established");
+        check(List.of().equals(observation.get("responseLineage"))
+                && List.of().equals(observation.get("providerItemBindings")), "no response lineage or item bindings exist");
+        check(Boolean.FALSE.equals(observation.get("requestInFlight"))
+                && Boolean.FALSE.equals(observation.get("readbackCaptured")), "no request or readback occurs");
+        check(expected.registry().equals(observation.get("trustedSourceRegistry")), "exact ten-document registry retained");
+        check(expected.registryIdentity().equals(observation.get("trustedRegistryIdentity")), "exact registry identity retained");
+        check(expected.roleBindings().equals(observation.get("roleProfileBindings")), "complete nine-role bindings retained");
+        check(expected.assemblyIdentity().equals(observation.get("instructionAssemblyIdentity")), "exact assembly identity retained");
+
+        var evidence = Json.parse(harness.evidenceJson());
+        check("NOT_EVALUATED".equals(evidence.get("protocolAcceptance")), "local evidence is not discovery acceptance");
+        var events = ((List<?>) evidence.get("events")).stream().map(SourceContractTest::object).toList();
+        check(events.stream().map(event -> event.get("kind")).toList().equals(
+                List.of("INITIALIZED", "TRUSTED_INPUTS_FROZEN")), "no request, response, item or discovery events retained");
+        var retained = object(events.getLast().get("material"));
+        check(expected.instructions().equals(retained.get("exactInstructionPayload")), "full exact instruction payload retained");
+        check(expected.registry().equals(retained.get("registry")), "full exact registry retained in evidence");
+        check(expected.roleBindings().equals(retained.get("roleBindings")), "full role bindings retained in evidence");
+        check(expected.assemblyIdentity().equals(retained.get("assemblyIdentity")), "full assembly identity retained in evidence");
+        check(client.dispatches == 0, "freeze and local inspection never dispatch transport");
     }
 
     private static void specialistBindings(Path root) throws Exception {

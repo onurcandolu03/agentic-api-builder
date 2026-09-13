@@ -89,6 +89,9 @@ public final class HarnessTest {
         run("local readiness never grants read mutation or validation", HarnessTest::readyAccessDenial);
         run("corrupted retained lineage and evidence block", HarnessTest::corruptedState);
         run("structured escaped and malformed secret payloads retain no evidence", HarnessTest::structuredSecretRejection);
+        run("credential field names with empty structure remain inspectable", HarnessTest::emptyCredentialStructures);
+        run("credential ancestry rejects values inside schema-like containers", HarnessTest::credentialStructureValues);
+        run("schema-like secrets never enter response or item evidence", HarnessTest::credentialStructureRetention);
         run("candidate configuration rejected before fingerprint retention", HarnessTest::unsafeCandidateConfiguration);
         run("evidence callbacks cannot replace validated candidate bytes", HarnessTest::evidenceCallbackMutation);
         run("embedded JSON secrets reject through public harness before retention", HarnessTest::embeddedSecretRejection);
@@ -1313,6 +1316,128 @@ public final class HarnessTest {
         var accepted = new Evidence(client::rejectCredentialMaterial);
         accepted.append("SAFE_FIXTURE", Json.object("rawBody", harmless));
         check(accepted.snapshot().size() == 1, "harmless nested JSON remains usable");
+    }
+
+    private static void emptyCredentialStructures() throws Exception {
+        var guard = new HttpResponsesClient("fixture-schema-credential", request -> {
+            throw new AssertionError("Schema inspection must not invoke transport");
+        });
+        // Exact MASTER fragment and minimal reproducers: the former populated() checked only
+        // outer container size, even when every descendant value was an empty placeholder.
+        String fragment = "{\"authorization\":{\"callerAuthorization\":{},\"checkpointReference\":\"\"}}";
+        var payloads = new ArrayList<>(List.of(fragment, "{\"authorization\":{\"x\":\"\"}}",
+                "{\"token\":[null]}",
+                "{\"authorization\":{\"nested\":[null,\"\",{},[],{\"field\":[]}]}}",
+                "{\"token\":[null,\"\",{\"value\":\"\"}]}",
+                "{\"\\u0061uthorization\":{\"field\":\"\"}}",
+                "Schema: " + fragment + " end.", "```json\n" + fragment + "\n```",
+                "Schema: " + Json.write(fragment), "First {} then " + fragment + " then [null].",
+                "Schema field names: authorization token password secret credential apiKey.",
+                "{\"required\":[\"authorization\",\"token\",\"password\",\"secret\",\"credential\",\"apiKey\"]}"));
+        for (String key : List.of("password", "api_key", "apiKey", "token", "access_token",
+                "authorization", "bearer", "secret", "private_key")) {
+            payloads.add(Json.write(Json.object(key, "")));
+            payloads.add(Json.write(Json.object(key, Json.object())));
+            Evidence.inspectSecretMaterial(Json.object(key, Json.object("field", List.of("", Json.object()))),
+                    guard::rejectCredentialMaterial);
+        }
+        for (String payload : payloads) {
+            Evidence.rejectObviousSecrets(payload);
+            guard.rejectCredentialMaterial(payload);
+            var evidence = new Evidence(guard::rejectCredentialMaterial);
+            evidence.append("SCHEMA_FIXTURE", Json.object("rawBody", payload));
+            check(evidence.snapshot().size() == 1 && evidence.serialize().contains("SCHEMA_FIXTURE"),
+                    "safe field names and empty placeholders survive retention and reinspection");
+        }
+    }
+
+    private static void credentialStructureValues() throws Exception {
+        var guard = new HttpResponsesClient("fixture-schema-credential", request -> {
+            throw new AssertionError("Credential inspection must not invoke transport");
+        });
+        for (String key : List.of("password", "api_key", "apiKey", "token", "access_token",
+                "authorization", "bearer", "secret", "private_key", " AUTHORIZATION ", "To_K-eN")) {
+            // No named/string placeholder exemptions: even one character, whitespace, false or zero
+            // under an inherited sensitive key must reject, independent of the prose regex.
+            for (Object value : List.of("actual-secret", "x", " ", "{}", "null", "<redacted>", "string", 0, false)) {
+                for (Object container : List.of(value, List.of(value), Json.object("field", value),
+                        Json.object("empty", Json.object(), "nested", List.of(Json.object("field", value))))) {
+                    var candidate = Json.object(key, container);
+                    var failure = expect(IllegalArgumentException.class,
+                            () -> Evidence.inspectSecretMaterial(candidate, guard::rejectCredentialMaterial));
+                    check(failure.getMessage().equals("SECRET_MATERIAL_REJECTED"), "sensitive value ancestry preserved");
+                    expect(IllegalArgumentException.class, () -> guard.rejectCredentialMaterial(Json.write(candidate)));
+                }
+            }
+        }
+        // Structural keys are still inspected, including configured values that look like placeholders.
+        for (String credential : List.of("<redacted>", "string")) {
+            var configured = new HttpResponsesClient(credential, request -> {
+                throw new AssertionError("Configured credential inspection must not invoke transport");
+            });
+            String encoded = credential.chars().mapToObj(c -> String.format("\\u%04x", c))
+                    .collect(Collectors.joining());
+            for (String payload : List.of(Json.write(Json.object("authorization", Json.object(credential, ""))),
+                    "{\"authorization\":{\"" + encoded + "\":\"\"}}",
+                    Json.write(Json.object("note", credential)), "{\"note\":\"" + encoded + "\"}")) {
+                expect(IllegalArgumentException.class, () -> configured.rejectCredentialMaterial(payload));
+                var evidence = new Evidence(configured::rejectCredentialMaterial);
+                expect(IllegalArgumentException.class, () -> evidence.append("REJECTED_SCHEMA", Json.object("rawBody", payload)));
+                check(evidence.snapshot().isEmpty(), "placeholder-looking configured material is never retained");
+            }
+        }
+        for (String key : List.of("sk-fixtureSecret0123456789", "-----BEGIN PRIVATE KEY-----",
+                "Authorization: Bearer fixture-value"))
+            expect(IllegalArgumentException.class,
+                    () -> guard.rejectCredentialMaterial(Json.write(Json.object("authorization", Json.object(key, "")))));
+        expect(IllegalArgumentException.class,
+                () -> guard.rejectCredentialMaterial("{\"authorization\":{\"x\":{\"password\":\"\",\"password\":\"x\"}}}"));
+        expect(IllegalArgumentException.class,
+                () -> guard.rejectCredentialMaterial("{\"token\":" + "[".repeat(65) + "null" + "]".repeat(65) + "}"));
+    }
+
+    private static void credentialStructureRetention() throws Exception {
+        String credential = "fixture-schema-credential";
+        String secret = "fixture-schema-secret";
+        String sensitive = Json.write(Json.object("authorization",
+                Json.object("callerAuthorization", Json.object(), "checkpointReference", secret)));
+        String encoded = secret.chars().mapToObj(c -> String.format("\\u%04x", c))
+                .collect(Collectors.joining());
+        var payloads = new ArrayList<>(List.of(sensitive, "Before " + sensitive + " after.",
+                "```json\n" + sensitive + "\n```", "[" + sensitive + "]",
+                Json.write(Json.object("note", "Nested: " + sensitive)), Json.write(sensitive),
+                "First {\"token\":[null]} then " + sensitive + " after {}.",
+                "{\"\\u0061uthorization\":{\"field\":\"" + encoded + "\"}}",
+                "{\"authorization\":{\"field\":[null,{},\"" + encoded + "\"]}}",
+                Json.write(Json.object("authorization", Json.object(credential, ""))),
+                "Result: \"prefix \"" + encoded + "\" suffix\""));
+        for (int backslashes : List.of(1, 2, 3, 4))
+            payloads.add("Result: \"first\"" + "\\".repeat(backslashes) + "\"" + encoded + "\"last\"");
+        for (String payload : payloads) {
+            assertEmbeddedRejected(payload, credential, secret);
+            var guard = new HttpResponsesClient(credential, request -> {
+                throw new AssertionError("Credential inspection must not invoke transport");
+            });
+            // Exercise the input-item readback boundary as well as response text above.
+            var mock = new Mock();
+            mock.safetyCheck = guard::rejectCredentialMaterial;
+            mock.pageTransform = page -> {
+                var item = new LinkedHashMap<>(map(((List<?>) page.get("data")).getFirst()));
+                item.put("schemaFixture", payload);
+                page.put("data", List.of(item));
+                return page;
+            };
+            var harness = new Fixture().registered(mock);
+            expect(ControlledHarness.Stop.class, harness::createMasterContext);
+            terminal(harness, "FAILED");
+            String exported = harness.evidenceJson();
+            check(!exported.contains(secret) && !exported.contains(credential) && !exported.contains(encoded)
+                    && !exported.contains("schemaFixture") && !exported.contains("INPUT_ITEMS_RETRIEVED")
+                    && !exported.contains("msg_1"), "rejected input page, item and fingerprints are never retained");
+            check(((List<?>) harness.inspect().get("providerItemBindings")).size() == 1,
+                    "only the earlier safe output item is bound");
+            check(Boolean.FALSE.equals(harness.inspect().get("readbackCaptured")), "rejected input prevents readiness");
+        }
     }
 
     private static void unsafeCandidateConfiguration() throws Exception {
