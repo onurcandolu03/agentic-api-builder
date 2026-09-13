@@ -98,9 +98,9 @@ Validate fingerprints using the shared recompute-versus-correlate split:
   composition, and each supplied expected-semantics canonical value.
 - Compare the recomputed analysis, plan, contract, and executing-specification
   members with their exact bundle entries.
-- Structurally correlate and copy request, caller-resolution, agent 01/02,
-  MASTER, other-specialist, runtime, and historical-event/projection members
-  whose source bytes MASTER retains but did not supply. MUST NOT claim to
+- Structurally correlate and copy request, caller-resolution, agent 00/01/02,
+  source-analysis, MASTER, other-specialist, runtime, and historical-event/projection
+  members whose source bytes MASTER retains but did not supply. MUST NOT claim to
   recompute unavailable bytes. If a complete source is supplied, recompute it.
 - Use only the shared complete `ArtifactFingerprint`, SHA-256, controlled
   artifact roles, `CANONICAL_JSON_V1`, and canonical path/state schemas. Original

@@ -89,8 +89,8 @@ Use the shared recompute-versus-correlate rule recursively:
   `commands` is empty.
 - Structurally correlate and copy references to unsupplied authority/history
   retained and validated by MASTER. This includes request/resolution, agent
-  01/02, MASTER, other-specialist, historical completion/projection, and analysis
-  evidence source artifacts when their bytes are not supplied. Never claim to
+  00/01/02, source-analysis, MASTER, other-specialist, historical completion/projection,
+  and analysis evidence source artifacts when their bytes are not supplied. Never claim to
   recompute unavailable bytes. Supplying a complete source moves it to the
   recompute class.
 - Use complete shared `ArtifactFingerprint` objects with SHA-256, exact byte

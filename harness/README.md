@@ -1,12 +1,13 @@
 # Controlled Responses harness foundation
 
-This isolated Java 21 library supplies host evidence for a **future** pre-01
+This isolated Java 21 library supplies host evidence for a **future** pre-analysis
 instruction-discovery review. It does not run the migration workflow, implement
 MASTER's acceptance predicates, issue `DISCOVERY_CONTROL_CHECK_V1`, or authorize
-target content access. There is deliberately no executable live launcher.
+source or target content access. There is deliberately no executable live launcher.
 
 `ControlledHarness` owns one in-memory state, a fixed trusted chain, an immutable
-request configuration, a target broker, response lineage, and reached evidence.
+request configuration, a target broker, an optional source metadata boundary,
+response lineage, and reached evidence.
 Its inspector reads those same objects. Inspection snapshots cannot change them.
 Host material is labeled `HOST_EVIDENCE_V1`; it is not an accepted orchestration
 artifact, an execution permission, or authenticated runtime evidence.
@@ -14,18 +15,25 @@ artifact, an execution permission, or authenticated runtime evidence.
 ## Trust and instruction selection
 
 The embedding host explicitly designates an absolute trusted specifications root
-and a separate absolute target root. This designation is a host trust decision:
+and a separate absolute target root. The five-argument constructor additionally
+accepts an explicit source root for future `SOURCE_TO_TARGET` execution; the
+existing four-argument constructor leaves source access unavailable. These
+designations are host trust decisions:
 path names and hashes cannot authenticate the original provenance of copied
-bytes. A target, model response, or tool result must never supply these arguments
+bytes. A source, target, model response, or tool result must never supply these arguments
 or implement the trusted `ResponsesClient` seam.
 
-The chain contains the exact shared contract, MASTER, and specifications 01–07.
-All nine documents are resolved and retained before any request. Symlinks below
-the trusted root, hard-linked source files, overlapping roots, malformed UTF-8,
-and changed source identity/bytes block. Target aliases are rejected using root
-metadata before any trusted source bytes are loaded. The host preamble selects only the active
+The chain contains the exact shared contract, MASTER, and specifications 00–07.
+All ten documents are resolved and retained before any request. The role registry
+assembles MASTER, 00, then 01–07; profile bindings use the contract's sorted role
+order and cover all nine roles. Agent 00 has exact path
+`agents/00-source-analysis.md` and artifact role `AGENT_00_SPECIFICATION`.
+Symlinks below
+the trusted root, hard-linked specification files, overlapping roots, malformed UTF-8,
+and changed trusted-file identity/bytes block. Target aliases are rejected using root
+metadata before any trusted instruction bytes are loaded. The host preamble selects only the active
 role; the other specifications remain inactive references. No `AGENTS.md` loader,
-cwd-based lookup, target-selected configuration, or additional tool registration
+cwd-based lookup, repository-selected configuration, or additional tool registration
 exists. Every continuation explicitly includes the identical `instructions`
 payload and uses the retained `previous_response_id`. There is no resume/import
 operation and no fallback to a new context.
@@ -35,7 +43,7 @@ direct host interface. Function dispatch and model-visible target data tools are
 future work, requiring their own protocol integration. Changing roles prepares
 the next sequential role within the same logical context; execution of every
 specialist remains blocked in this milestone. Role selection never grants plan,
-dispatch, target-read, mutation, or validation authority.
+dispatch, source-read, target-read, mutation, or validation authority.
 
 ## Metadata and access
 
@@ -43,6 +51,35 @@ Access starts `CLOSED`. The explicit host metadata route alone can enter
 `METADATA_ONLY`. Content reads, mutation, and validation remain unavailable even
 after local `DISCOVERY_GATE_READY`. A denied transition closes the broker and
 terminates the harness; neither can silently reopen.
+
+When the host designates source, `SourceBoundary` checks source, trusted, and
+target directory metadata before any trusted bytes are loaded. All three roots
+must be existing absolute, normalized NFC POSIX paths without symlink components
+or aliases. Source must be disjoint from both other roots: equality or ancestor
+overlap rejects, using both resolved path containment and root/ancestor filesystem
+identities. Source has only `READ_ONLY` authority and `CLOSED`/`METADATA_ONLY`
+states. It has no target phase enum, mutation API, content reader, or Git
+classification. The target broker's existing metadata and access rules remain
+unchanged.
+
+`inspectSourceLocator(Path)` is a direct host metadata interface. It accepts an
+existing contained absolute or relative file/module locator, rejects traversal,
+symlinks, regular-file hardlinks, colon/reverse-solidus spellings, and escape from
+the source root, and returns relative path/identity/kind metadata without reading
+content. Locators are host `Path` values; this is not a canonical artifact path
+parser or migration scope authorization. Root/ancestor identities are rechecked
+at host boundaries, and failures close both access controllers. Source designation
+and exact metadata fingerprints are retained in host configuration/evidence and
+inspection, separately from target metadata. Source files, including AGENTS-like
+files, cannot extend the trusted chain.
+
+This implements a testable source metadata boundary only. It does not emit an
+accepted `SOURCE_READ_ONLY_CONTROL_V1` declaration or `SOURCE_ACCESS_CHECK_V1`
+PASS, establish source discovery control,
+or supply a source content broker. It does not run agent 00 or produce
+`source-analysis.json`. Directory checks cannot exclude concurrent replacement,
+other processes, alternate filesystem behavior, or filesystem races; they are
+not OS isolation or race-free confinement.
 
 The lifecycle is `INITIALIZED` → `TRUSTED_INPUTS_FROZEN` →
 `TARGET_METADATA_REGISTERED` → `MASTER_CONTEXT_CREATED` →
@@ -52,7 +89,7 @@ continuation repeats those checks with the retained previous response. Missing
 capabilities or trust drift end in `BLOCKED`; API/correlation failures end in
 `FAILED`; explicit shutdown ends in `CLOSED`. Terminal contexts cannot resume.
 
-The metadata route uses no subprocesses. It accepts existing, absolute,
+The target metadata route uses no subprocesses. It accepts existing, absolute,
 normalized, NFC POSIX roots with no symlink components and encodes identity as
 `POSIX:<device-base10>:<inode-base10>`. Windows and unavailable identity block.
 Non-Git roots are supported. Git support is deliberately restricted to direct
@@ -137,8 +174,12 @@ From this repository, run only:
 bash harness/test.sh
 ```
 
-This compiles and runs only the new harness and its standalone test class in an
-isolated temporary directory. It does not invoke Maven/Gradle, compile application
+This compiles the harness and runs `HarnessTest` and `SourceContractTest` in an
+isolated temporary directory. Runtime checks use mocked transports and fixture
+repositories. Contract checks parse the authoritative Markdown JSON structures,
+check normative rules and exact trusted fingerprints, and verify that variable
+caller data is representable. They do not execute source discovery or planning.
+The script does not invoke Maven/Gradle, compile application
 sources, run project tests, execute a migration role, or call the network. Fixtures
 are created beneath `/private/tmp` when available (otherwise canonical `/tmp`),
 outside any real target. No API key is required or read by these tests.
@@ -147,7 +188,16 @@ outside any real target. No API key is required or read by these tests.
 
 Live runtime evidence, canonical declaration/check construction and MASTER
 acceptance, accepted gate delivery to specialists, migration authority bundles,
-specialist dispatch, target content tools, mutation, validation, crash recovery,
+specialist dispatch, source and target content tools, mutation, validation, crash recovery,
 and durable evidence storage are outside this milestone. Local readiness means
 the retained MASTER creation/readback and fresh host observations are available
 for that later review. It does not mean the discovery gate passed or E2E is ready.
+
+An offline integration probe also found that the unchanged secret scanner
+rejects the full `MASTER.md` text with `SECRET_MATERIAL_REJECTED`, both at the
+approved baseline and with this patch. Consequently the complete repository
+instruction payload currently blocks in the public host freeze path. The new
+00 specification passes that scanner independently; exact trusted-file loading
+and fingerprint checks do not claim public host acceptance. The existing
+scanner was preserved. Resolving that earlier document/scanner incompatibility
+remains necessary before a live launcher can use the complete document chain.

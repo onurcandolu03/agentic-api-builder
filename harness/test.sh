@@ -25,5 +25,6 @@ trap 'rm -rf -- "$harness_temp"' EXIT
 mkdir "$harness_temp/classes"
 javac --release 21 -cp "$harness_classpath" -d "$harness_temp/classes" \
   "$harness_root"/src/dev/agentic/harness/*.java \
-  "$harness_root"/test/dev/agentic/harness/HarnessTest.java
+  "$harness_root"/test/dev/agentic/harness/*.java
 java -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.HarnessTest "$harness_temp"
+java -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.SourceContractTest "$harness_root/.." "$harness_temp"

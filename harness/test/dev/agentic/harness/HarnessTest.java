@@ -35,7 +35,17 @@ public final class HarnessTest {
 
         run("canonical JSON and deterministic fingerprints", HarnessTest::canonicalJson);
         run("deep immutable host JSON", HarnessTest::immutableJson);
-        run("role registry is exactly MASTER and 01 through 07", HarnessTest::roleRegistry);
+        run("role registry is exactly MASTER and 00 through 07", HarnessTest::roleRegistry);
+        run("source authority is permanently read-only metadata", HarnessTest::sourceAuthority);
+        run("source roots cannot overlap trusted or target roots", HarnessTest::sourceRootSeparation);
+        run("source and comparison-root aliases fail closed", HarnessTest::sourceAliases);
+        run("source locators remain within their designated root", HarnessTest::sourceLocators);
+        run("source metadata drift and closed boundaries cannot resume", HarnessTest::sourceDrift);
+        run("source designation is frozen before trusted inputs and retained as host evidence", HarnessTest::sourceLifecycle);
+        run("source content cannot supply instructions or appear in evidence", HarnessTest::sourceExclusion);
+        run("source locator rejection terminates both access boundaries", HarnessTest::sourceFailure);
+        run("source registration rejects aliases before trusted bytes", HarnessTest::sourceBeforeFreeze);
+        run("source host callbacks cannot publish progress after shutdown", HarnessTest::sourceCallbacks);
         run("target access defaults closed and cannot skip metadata", HarnessTest::closedAccess);
         run("target metadata phase never grants content access", HarnessTest::metadataAccess);
         run("invalid and unsafe roots fail closed", HarnessTest::invalidRoots);
@@ -115,6 +125,7 @@ public final class HarnessTest {
         final Path root = Files.createTempDirectory(testRoot, "case-");
         final Path trusted = Files.createDirectory(root.resolve("trusted"));
         final Path target = Files.createDirectory(root.resolve("target"));
+        final Path source = Files.createDirectory(root.resolve("source"));
         Fixture() throws IOException {
             write(trusted.resolve("agents/contracts/orchestration-contract.md"), "Trusted contract fixture.\n");
             for (var role : TrustedInputs.Role.values())
@@ -122,6 +133,10 @@ public final class HarnessTest {
         }
         ControlledHarness harness(ResponsesClient client) {
             return new ControlledHarness(trusted, target, new ControlledHarness.Config("fixture-model-v1", 128), client);
+        }
+        ControlledHarness sourceHarness(ResponsesClient client) {
+            return new ControlledHarness(trusted, source, target,
+                    new ControlledHarness.Config("fixture-model-v1", 128), client);
         }
         ControlledHarness registered(Mock client) {
             var harness = harness(client);
@@ -242,13 +257,232 @@ public final class HarnessTest {
     }
 
     private static void roleRegistry() throws Exception {
-        Set<String> expected = Set.of("MASTER", "01-target-analysis", "02-migration-planning",
+        List<String> expected = List.of("MASTER", "00-source-analysis", "01-target-analysis", "02-migration-planning",
                 "03-domain-contract-implementation", "04-persistence-mapping-implementation",
                 "05-service-api-implementation", "06-test-implementation", "07-validation");
-        check(Arrays.stream(TrustedInputs.Role.values()).map(role -> role.id).collect(Collectors.toSet())
-                .equals(expected), "exact registry");
-        check(TrustedInputs.Role.values().length == 8, "no duplicate roles");
+        check(Arrays.stream(TrustedInputs.Role.values()).map(role -> role.id).toList()
+                .equals(expected), "exact registry in deterministic assembly order");
+        check(TrustedInputs.Role.values().length == 9, "no duplicate roles");
+        var sourceRole = TrustedInputs.Role.find("00-source-analysis");
+        check(sourceRole == TrustedInputs.Role.SOURCE_ANALYSIS, "first-class source enum role");
+        check(sourceRole.location.equals("agents/00-source-analysis.md"), "exact source role path");
+        check(sourceRole.artifactRole.equals("AGENT_00_SPECIFICATION"), "exact source artifact role");
         expect(IllegalArgumentException.class, () -> TrustedInputs.Role.find("unregistered"));
+        expect(IllegalArgumentException.class, () -> TrustedInputs.Role.find("agents/00-source-analysis.md"));
+    }
+
+    private static SourceBoundary sourceBoundary(Fixture fixture) throws Exception {
+        var boundary = new SourceBoundary();
+        boundary.register(fixture.source, fixture.trusted, fixture.target);
+        return boundary;
+    }
+
+    private static void sourceAuthority() throws Exception {
+        check(Arrays.asList(SourceBoundary.Authority.values()).equals(List.of(SourceBoundary.Authority.READ_ONLY)),
+                "source authority cannot represent mutation or target phases");
+        check(Arrays.asList(SourceBoundary.State.values()).equals(List.of(SourceBoundary.State.CLOSED,
+                SourceBoundary.State.METADATA_ONLY)), "no source content capability is implemented");
+        var boundary = new SourceBoundary();
+        check(boundary.state() == SourceBoundary.State.CLOSED && boundary.metadata() == null, "source starts closed");
+        expect(IOException.class, () -> boundary.inspectLocator(Path.of("Example.java")));
+        var fixture = new Fixture();
+        var source = sourceBoundary(fixture);
+        var target = new TargetBroker();
+        target.inspect(fixture.target);
+        check(source.authority() == SourceBoundary.Authority.READ_ONLY, "read-only designation");
+        check(Boolean.FALSE.equals(source.metadata().view().get("contentAccessImplemented")), "no fabricated source reads");
+        expect(IOException.class, () -> target.request(TargetBroker.Phase.MUTATION_ALLOWED));
+        source.verify();
+        check(source.state() == SourceBoundary.State.METADATA_ONLY, "target phase never alters source authority");
+    }
+
+    private static void sourceRootSeparation() throws Exception {
+        var fixture = new Fixture();
+        for (Path source : List.of(fixture.trusted, fixture.target, fixture.root,
+                Files.createDirectory(fixture.trusted.resolve("nested")),
+                Files.createDirectory(fixture.target.resolve("nested")))) {
+            var boundary = new SourceBoundary();
+            expect(IOException.class, () -> boundary.register(source, fixture.trusted, fixture.target));
+            check(boundary.state() == SourceBoundary.State.CLOSED, "overlap closes source boundary");
+        }
+        for (boolean containsTarget : List.of(false, true)) {
+            var next = new Fixture();
+            Path nested = Files.createDirectory(next.source.resolve("nested"));
+            var boundary = new SourceBoundary();
+            expect(IOException.class, () -> boundary.register(next.source,
+                    containsTarget ? next.trusted : nested, containsTarget ? nested : next.target));
+        }
+    }
+
+    private static void sourceAliases() throws Exception {
+        var fixture = new Fixture();
+        Path file = fixture.root.resolve("file");
+        write(file, "fixture");
+        Path alias = Files.createSymbolicLink(fixture.root.resolve("source-alias"), fixture.source);
+        for (Path source : List.of(Path.of("relative"), Path.of("/"), fixture.root.resolve("missing"),
+                fixture.source.resolve(".."), alias, file)) {
+            var boundary = new SourceBoundary();
+            expect(IOException.class, () -> boundary.register(source, fixture.trusted, fixture.target));
+        }
+        for (boolean trustedAlias : List.of(false, true)) {
+            Path other = Files.createSymbolicLink(fixture.root.resolve("alias-" + trustedAlias),
+                    trustedAlias ? fixture.trusted : fixture.target);
+            var boundary = new SourceBoundary();
+            expect(IOException.class, () -> boundary.register(fixture.source,
+                    trustedAlias ? other : fixture.trusted, trustedAlias ? fixture.target : other));
+        }
+        Path ancestorAlias = Files.createSymbolicLink(fixture.root.resolve("parent-alias"), fixture.root);
+        expect(IOException.class, () -> new SourceBoundary().register(ancestorAlias.resolve("source"),
+                fixture.trusted, fixture.target));
+        Path caseAlias = fixture.root.resolve("SOURCE");
+        if (Files.exists(caseAlias)) {
+            check(Files.isSameFile(caseAlias, fixture.source), "conditional fixture case alias");
+            expect(IOException.class, () -> new SourceBoundary().register(fixture.source, fixture.trusted, caseAlias));
+            Path nested = Files.createDirectory(fixture.source.resolve("nested"));
+            expect(IOException.class, () -> new SourceBoundary().register(caseAlias, fixture.trusted, nested));
+            expect(IOException.class, () -> new SourceBoundary().register(nested, fixture.trusted, caseAlias));
+        }
+    }
+
+    private static void sourceLocators() throws Exception {
+        var fixture = new Fixture();
+        write(fixture.source.resolve("src/Example.java"), "class Example {}\n");
+        var boundary = sourceBoundary(fixture);
+        var relative = boundary.inspectLocator(Path.of("src/Example.java"));
+        check(relative.equals(boundary.inspectLocator(fixture.source.resolve("src/Example.java"))),
+                "absolute and relative contained locators produce deterministic metadata");
+        check(relative.get("sourceRelativePath").equals("src/Example.java")
+                && relative.get("kind").equals("REGULAR_FILE"), "relative evidence identity");
+        check(relative.get("contentRead").equals(false), "locator inspection performs no content read");
+        check(boundary.inspectLocator(Path.of("src")).get("kind").equals("DIRECTORY"), "module locator supported");
+        Files.createSymbolicLink(fixture.source.resolve("outside"), fixture.target);
+        Files.createSymbolicLink(fixture.source.resolve("inside"), fixture.source.resolve("src"));
+        Files.createLink(fixture.source.resolve("linked.java"), fixture.source.resolve("src/Example.java"));
+        write(fixture.source.resolve("scheme:Example.java"), "fixture");
+        write(fixture.source.resolve("back\\slash.java"), "fixture");
+        for (Path locator : List.of(Path.of("../target"), Path.of("src/../src/Example.java"),
+                fixture.target, Path.of("outside"), Path.of("inside/Example.java"),
+                Path.of("linked.java"), Path.of("src/Example.java"), Path.of("missing"), Path.of("."), Path.of(""),
+                Path.of("scheme:Example.java"), Path.of("back\\slash.java"))) {
+            var next = sourceBoundary(fixture);
+            expect(IOException.class, () -> next.inspectLocator(locator));
+            check(next.state() == SourceBoundary.State.CLOSED, "unsafe locator closes boundary");
+            expect(IOException.class, () -> next.register(fixture.source, fixture.trusted, fixture.target));
+        }
+    }
+
+    private static void sourceDrift() throws Exception {
+        var fixture = new Fixture();
+        var boundary = sourceBoundary(fixture);
+        Files.move(fixture.source, fixture.root.resolve("old-source"));
+        Files.createDirectory(fixture.source);
+        expect(IOException.class, boundary::verify);
+        check(boundary.state() == SourceBoundary.State.CLOSED, "root replacement blocks");
+        var closed = sourceBoundary(new Fixture());
+        closed.close();
+        expect(IOException.class, closed::verify);
+    }
+
+    private static void sourceLifecycle() throws Exception {
+        var fixture = new Fixture();
+        write(fixture.source.resolve("Entry.java"), "class Entry {}\n");
+        var mock = new Mock();
+        var harness = fixture.sourceHarness(mock);
+        check(harness.inspect().get("sourceAccessState").equals("CLOSED"), "host source access initially closed");
+        harness.freezeTrustedInputs();
+        check(harness.inspect().get("sourceAccessState").equals("METADATA_ONLY"), "source metadata frozen before requests");
+        check(harness.inspectSourceLocator(Path.of("Entry.java")).get("sourceRelativePath").equals("Entry.java"),
+                "controlled host locator interface");
+        harness.registerTargetMetadata();
+        harness.createMasterContext();
+        harness.markDiscoveryGateReady();
+        var view = harness.inspect();
+        check(map(view.get("runtimeConfiguration")).get("sourceRootDesignation").equals(fixture.source.toString()),
+                "source designation bound to frozen configuration");
+        check(view.get("sourceMetadataIdentity").equals(Json.evidenceFingerprint(view.get("sourceMetadata"))),
+                "source fingerprint covers exact host metadata");
+        check(map(harness.discoveryMaterial().get("sourceMetadata")).equals(view.get("sourceMetadata")),
+                "source evidence retained without inventing canonical declaration");
+        check(harness.evidenceJson().contains("SOURCE_METADATA_REGISTERED"), "reached source registration evidence");
+        harness.switchRole("00-source-analysis", "resp_1");
+        expect(ControlledHarness.Stop.class, harness::executeSelectedSpecialist);
+        terminal(harness, "BLOCKED");
+        check(harness.inspect().get("sourceAccessState").equals("CLOSED"), "source closes on specialist denial");
+        check(mock.requests.size() == 1, "00 selection never executes analysis");
+    }
+
+    private static void sourceExclusion() throws Exception {
+        var fixture = new Fixture();
+        String poison = "SOURCE_POISON_MUST_NEVER_ENTER_INSTRUCTIONS";
+        for (String name : List.of("AGENTS.md", "README.md", "Entry.java", "nested/AGENTS.md", "pom.xml"))
+            write(fixture.source.resolve(name), poison);
+        var mock = new Mock();
+        var harness = fixture.sourceHarness(mock);
+        harness.freezeTrustedInputs();
+        harness.inspectSourceLocator(Path.of("AGENTS.md"));
+        harness.registerTargetMetadata();
+        harness.createMasterContext();
+        check(!mock.requests.getFirst().contains(poison) && !harness.evidenceJson().contains(poison),
+                "source content is neither read nor added to instructions/evidence");
+        check(Files.readString(fixture.source.resolve("Entry.java")).equals(poison), "source file bytes unchanged");
+        check(((List<?>) harness.inspect().get("registeredTools")).isEmpty(), "source does not add model-facing tools");
+    }
+
+    private static void sourceFailure() throws Exception {
+        var fixture = new Fixture();
+        var mock = new Mock();
+        var harness = fixture.sourceHarness(mock);
+        harness.freezeTrustedInputs();
+        harness.registerTargetMetadata();
+        expect(ControlledHarness.Stop.class, () -> harness.inspectSourceLocator(Path.of("../target")));
+        terminal(harness, "BLOCKED");
+        check(harness.inspect().get("sourceAccessState").equals("CLOSED"), "locator failure closes source");
+        check(mock.requests.isEmpty(), "locator rejection makes no API request");
+        var undesignated = fixture.registered(new Mock());
+        expect(ControlledHarness.Stop.class, () -> undesignated.inspectSourceLocator(Path.of("Entry.java")));
+        terminal(undesignated, "BLOCKED");
+        var driftMock = new Mock();
+        var drift = fixture.sourceHarness(driftMock);
+        drift.freezeTrustedInputs();
+        drift.registerTargetMetadata();
+        Files.move(fixture.source, fixture.root.resolve("old-source"));
+        Files.createDirectory(fixture.source);
+        expect(ControlledHarness.Stop.class, drift::createMasterContext);
+        check(driftMock.requests.isEmpty(), "source metadata drift blocks before dispatch");
+        terminal(drift, "BLOCKED");
+    }
+
+    private static void sourceBeforeFreeze() throws Exception {
+        var fixture = new Fixture();
+        Path alias = Files.createSymbolicLink(fixture.root.resolve("source-alias"), fixture.trusted);
+        var mock = new Mock();
+        var harness = new ControlledHarness(fixture.trusted, alias, fixture.target,
+                new ControlledHarness.Config("fixture-model-v1", 128), mock);
+        expect(ControlledHarness.Stop.class, harness::freezeTrustedInputs);
+        check(((List<?>) harness.inspect().get("trustedSourceRegistry")).isEmpty(), "unsafe source cannot load trusted chain");
+        check(harness.inspect().get("instructionAssemblyIdentity") == null, "no trusted hash for rejected designation");
+        check(mock.requests.isEmpty(), "source alias never reaches provider");
+    }
+
+    private static void sourceCallbacks() throws Exception {
+        for (boolean duringRegistration : List.of(false, true)) {
+            var fixture = new Fixture();
+            write(fixture.source.resolve("Entry.java"), "class Entry {}\n");
+            var mock = new Mock();
+            var harness = fixture.sourceHarness(mock);
+            if (!duringRegistration) harness.freezeTrustedInputs();
+            mock.safetyCheck = text -> {
+                if (text.contains(duringRegistration ? "contentAccessImplemented" : "sourceRelativePath"))
+                    harness.close();
+            };
+            expect(ControlledHarness.Stop.class, () -> {
+                if (duringRegistration) harness.freezeTrustedInputs();
+                else harness.inspectSourceLocator(Path.of("Entry.java"));
+            });
+            terminal(harness, "CLOSED");
+            check(harness.inspect().get("sourceAccessState").equals("CLOSED"), "successful callback cannot reopen source");
+            check(mock.requests.isEmpty(), "source callback close never dispatches");
+        }
     }
 
     private static void closedAccess() throws Exception {
@@ -346,11 +580,24 @@ public final class HarnessTest {
     private static void trustedFreeze() throws Exception {
         var fixture = new Fixture();
         var trusted = TrustedInputs.freeze(fixture.trusted, fixture.target);
-        check(trusted.registry().size() == 9, "exact nine sources");
-        check(trusted.roleBindings().size() == 8, "eight profile bindings");
+        check(trusted.registry().size() == 10, "exact ten trusted sources");
+        check(trusted.roleBindings().size() == 9, "nine profile bindings");
+        var sortedRoles = Arrays.stream(TrustedInputs.Role.values()).map(r -> r.id).sorted().toList();
+        check(trusted.roleBindings().stream().map(r -> r.get("role")).toList().equals(sortedRoles),
+                "profile bindings preserve contract role sort including 00");
+        var expectedLocations = new ArrayList<String>(List.of("agents/contracts/orchestration-contract.md"));
+        expectedLocations.addAll(Arrays.stream(TrustedInputs.Role.values()).map(r -> r.location).toList());
+        for (int i = 0; i < expectedLocations.size(); i++) {
+            var actual = trusted.registry().get(i);
+            Path exactPath = fixture.trusted.resolve(expectedLocations.get(i));
+            String artifactRole = i == 0 ? "ORCHESTRATION_CONTRACT" : TrustedInputs.Role.values()[i - 1].artifactRole;
+            check(actual.get("resolvedLocation").equals(exactPath.toString()), "fixed chain order and exact path");
+            check(actual.get("artifactFingerprint").equals(Json.fingerprint(artifactRole, Files.readAllBytes(exactPath))),
+                    "each fingerprint covers exact original UTF8 bytes and artifact role");
+        }
         check(trusted.instructions().contains(Files.readString(fixture.trusted.resolve("MASTER.md"))), "exact trusted bytes");
         String frozen = trusted.instructions();
-        Files.writeString(fixture.trusted.resolve("MASTER.md"), "Changed trusted bytes.");
+        Files.writeString(fixture.trusted.resolve("agents/00-source-analysis.md"), "Changed trusted source-analysis bytes.");
         check(trusted.instructions().equals(frozen), "frozen payload retained");
         expect(IOException.class, () -> trusted.verify(fixture.target));
     }

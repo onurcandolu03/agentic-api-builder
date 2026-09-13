@@ -92,9 +92,10 @@ Recompute fingerprints for every complete source object or byte sequence
 supplied here: the run-authority bundle, dispatch, proof, before manifests and
 projections, analysis, plan, contract, and this specialist specification.
 Within the bundle, compare those recomputed members; structurally correlate and
-copy the request, caller-resolution, agent 01, agent 02, MASTER, other-specialist,
-and runtime members whose source bytes were not supplied. Never claim to
-recompute unavailable bytes. Any required mismatch is `FAILED` before mutation.
+copy the request, caller-resolution, agent 00/01/02, source-analysis, MASTER,
+other-specialist, and runtime members whose source bytes were not supplied.
+Never claim to recompute unavailable bytes. Any required mismatch is `FAILED`
+before mutation.
 
 Apply assignment rules deterministically:
 

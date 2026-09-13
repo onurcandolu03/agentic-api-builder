@@ -35,10 +35,12 @@ public final class ControlledHarness {
     private static final String VERSION = "controlled-responses-harness/1";
     private static final List<Object> TOOLS = List.of();
     private final Path trustedRoot;
+    private final Path declaredSource;
     private final Path declaredTarget;
     private final Config config;
     private final ResponsesClient client;
     private final TargetBroker broker = new TargetBroker();
+    private final SourceBoundary sourceBoundary;
     private final Evidence evidence;
     private final String contextId = UUID.randomUUID().toString();
     private final List<Map<String, Object>> lineage = new ArrayList<>();
@@ -62,8 +64,16 @@ public final class ControlledHarness {
 
     /** Arguments are trusted host input, never target-derived configuration or model output. */
     public ControlledHarness(Path trustedRoot, Path declaredTarget, Config config, ResponsesClient client) {
+        this(trustedRoot, null, declaredTarget, config, client);
+    }
+
+    /** Optional source designation adds metadata checks only; it does not enable source analysis. */
+    public ControlledHarness(Path trustedRoot, Path declaredSource, Path declaredTarget,
+                             Config config, ResponsesClient client) {
         this.trustedRoot = Objects.requireNonNull(trustedRoot);
+        this.declaredSource = declaredSource;
         this.declaredTarget = Objects.requireNonNull(declaredTarget);
+        this.sourceBoundary = declaredSource == null ? null : new SourceBoundary();
         this.config = Objects.requireNonNull(config);
         this.client = Objects.requireNonNull(client);
         this.evidence = new Evidence(text -> providerCallback(() -> {
@@ -73,6 +83,7 @@ public final class ControlledHarness {
         operationActive = true;
         try {
             evidence.safe(declaredTarget.toString());
+            if (declaredSource != null) evidence.safe(declaredSource.toString());
             var initial = runtimeConfiguration();
             this.initializedConfiguration = Json.write(initial);
             evidence.safe(initializedConfiguration);
@@ -85,6 +96,7 @@ public final class ControlledHarness {
         return Json.object("harnessVersion", VERSION, "javaRuntimeVersion", Runtime.version().toString(),
                 "controlMode", "FIXED_TRUSTED_CONTEXT", "launchMechanism", "RESPONSES_SAME_CONTEXT_SEQUENTIAL",
                 "startupCwd", startupCwd, "trustedRootDesignation", trustedRoot.toString(),
+                "sourceRootDesignation", declaredSource == null ? null : declaredSource.toString(),
                 "model", config.model(), "maxOutputTokens", config.maxOutputTokens(), "tools", TOOLS,
                 "toolChoice", "none", "store", true, "stream", false, "background", false,
                 "parallelToolCalls", false, "truncation", "disabled",
@@ -115,12 +127,20 @@ public final class ControlledHarness {
             require(State.INITIALIZED);
             try {
                 verifyConfiguration();
+                if (sourceBoundary != null) {
+                    var metadata = sourceBoundary.register(declaredSource, trustedRoot, declaredTarget);
+                    evidence.safe(Json.write(metadata.view()));
+                    evidence.append("SOURCE_METADATA_REGISTERED", metadata.view());
+                    require(State.INITIALIZED);
+                }
                 var frozen = TrustedInputs.freeze(trustedRoot, declaredTarget);
+                if (sourceBoundary != null) sourceBoundary.verify();
                 evidence.safe(frozen.instructions());
                 evidence.append("TRUSTED_INPUTS_FROZEN", Json.object("registry", frozen.registry(),
                         "roleBindings", frozen.roleBindings(), "exactInstructionPayload", frozen.instructions(),
                         "assemblyIdentity", frozen.assemblyIdentity()));
                 require(State.INITIALIZED);
+                if (sourceBoundary != null) sourceBoundary.verify();
                 trusted = frozen;
                 state = State.TRUSTED_INPUTS_FROZEN;
             } catch (Exception failure) { throw stop(State.BLOCKED, "TRUSTED_INPUT_FREEZE_REJECTED"); }
@@ -135,9 +155,11 @@ public final class ControlledHarness {
                 verifyConfiguration();
                 var metadata = broker.inspect(declaredTarget);
                 trusted.verify(Path.of(metadata.resolvedRoot()));
+                if (sourceBoundary != null) sourceBoundary.verify();
                 evidence.safe(Json.write(metadata.view()));
                 evidence.append("TARGET_METADATA_REGISTERED", metadata.view());
                 require(State.TRUSTED_INPUTS_FROZEN);
+                if (sourceBoundary != null) sourceBoundary.verify();
                 state = State.TARGET_METADATA_REGISTERED;
             } catch (Exception failure) { throw stop(State.BLOCKED, "TARGET_METADATA_REJECTED"); }
         } finally { operationActive = false; }
@@ -471,6 +493,23 @@ public final class ControlledHarness {
         } finally { operationActive = false; }
     }
 
+    /** Host metadata route only. There is no model tool, source content read, or source phase grant. */
+    public synchronized Map<String, Object> inspectSourceLocator(Path locator) {
+        beginOperation();
+        try {
+            if (trusted == null || sourceBoundary == null || sourceBoundary.metadata() == null)
+                throw stop(State.BLOCKED, "SOURCE_METADATA_UNAVAILABLE");
+            try {
+                verifyActive();
+                var metadata = sourceBoundary.inspectLocator(locator);
+                evidence.safe(Json.write(metadata));
+                evidence.append("SOURCE_LOCATOR_OBSERVED", metadata);
+                verifyActive();
+                return metadata;
+            } catch (Exception failure) { throw stop(State.BLOCKED, "SOURCE_LOCATOR_REJECTED"); }
+        } finally { operationActive = false; }
+    }
+
     public synchronized void createNestedAgent() {
         beginOperation();
         try {
@@ -519,6 +558,7 @@ public final class ControlledHarness {
             if (trusted != null) trusted.verify(broker.metadata() == null ? declaredTarget.normalize()
                     : Path.of(broker.metadata().resolvedRoot()));
             if (broker.metadata() != null) broker.verify();
+            if (sourceBoundary != null && sourceBoundary.metadata() != null) sourceBoundary.verify();
             String previous = null;
             for (int i = 0; i < lineage.size(); i++) {
                 var link = lineage.get(i);
@@ -580,6 +620,7 @@ public final class ControlledHarness {
                 // presented as still effective. No provider exception or rejected bytes escape.
                 return Json.object("format", "HOST_RUNTIME_INSPECTION_V1", "logicalContextId", contextId,
                         "state", state.name(), "targetAccessPhase", broker.phase().name(),
+                        "sourceAccessState", sourceBoundary == null ? "NOT_DESIGNATED" : sourceBoundary.state().name(),
                         "configurationChangedSinceInitialization", configurationChanged,
                         "runtimeConfigurationObservation", "UNAVAILABLE", "protocolAcceptance", "NOT_EVALUATED",
                         "failureCode", failureCode);
@@ -620,6 +661,11 @@ public final class ControlledHarness {
                 "registeredTools", TOOLS, "targetAccessPhase", broker.phase().name(),
                 "targetMetadata", broker.metadata() == null ? null : broker.metadata().view(),
                 "targetMetadataIdentity", broker.metadata() == null ? null : Json.evidenceFingerprint(broker.metadata().view()),
+                "sourceAccessState", sourceBoundary == null ? "NOT_DESIGNATED" : sourceBoundary.state().name(),
+                "sourceMetadata", sourceBoundary == null || sourceBoundary.metadata() == null
+                        ? null : sourceBoundary.metadata().view(),
+                "sourceMetadataIdentity", sourceBoundary == null || sourceBoundary.metadata() == null
+                        ? null : Json.evidenceFingerprint(sourceBoundary.metadata().view()),
                 "activeRequestBody", activeRequest == null ? null : activeRequest.body(),
                 "requestInFlight", requestInFlight, "readbackCaptured", readbackCaptured,
                 "freshnessCounter", freshnessCounter, "roleSwitchCounter", roleSwitchCounter,
@@ -638,8 +684,8 @@ public final class ControlledHarness {
                 verifyActive();
                 var definition = Json.object("provider", VERSION, "controlMode", "FIXED_TRUSTED_CONTEXT",
                         "launchMechanism", "RESPONSES_SAME_CONTEXT_SEQUENTIAL", "instructionSelection",
-                        "Explicit host root plus nine fixed paths; exact UTF-8 retained before first request; no discovery fallback",
-                        "readAndCwdTriggers", "No source selection; metadata only; target content access remains unavailable",
+                        "Explicit host root plus ten fixed paths; exact UTF-8 retained before first request; no discovery fallback",
+                        "readAndCwdTriggers", "No repository instruction selection; metadata only; source and target content access remain unavailable",
                         "continuation", "Same retained response lineage; identical instructions on every request; no resume or repair",
                         "nestedContexts", "Unavailable; nested creation terminally blocks",
                         "inspection", "ControlledHarness.inspect reads active request/configuration/registry/broker/lineage objects",
@@ -657,6 +703,7 @@ public final class ControlledHarness {
                         "effectiveConfigurationFingerprint", Json.evidenceFingerprint(effectiveConfiguration),
                         "currentObservation", observation, "currentObservationFingerprint", Json.evidenceFingerprint(observation),
                         "sessionReference", contextId, "targetScope", broker.metadata().scope(),
+                        "sourceMetadata", sourceBoundary == null ? null : sourceBoundary.metadata().view(),
                         "roleProfileBindings", trusted.roleBindings());
                 evidence.safe(Json.write(material));
                 verifyConfiguration();
@@ -679,6 +726,7 @@ public final class ControlledHarness {
         if (!terminal()) {
             state = State.CLOSED;
             broker.close();
+            if (sourceBoundary != null) sourceBoundary.close();
             try { evidence.append("CLOSED", Json.object("logicalContextId", contextId)); }
             catch (RuntimeException unavailable) { failureCode = "CLOSE_EVIDENCE_UNAVAILABLE"; }
         }
@@ -695,6 +743,7 @@ public final class ControlledHarness {
             state = terminalState;
             failureCode = code;
             broker.close();
+            if (sourceBoundary != null) sourceBoundary.close();
             try { evidence.append("STOPPED", Json.object("logicalContextId", contextId, "state", state.name(), "code", code)); }
             catch (RuntimeException unavailable) { /* Preserve terminal state even if evidence itself is corrupt/unavailable. */ }
         }
