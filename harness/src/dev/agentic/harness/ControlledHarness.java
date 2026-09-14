@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.function.Supplier;
+import java.util.function.Consumer;
 
 /** Single cooperative host context. No migration scheduler or protocol acceptance is implemented. */
 public final class ControlledHarness {
@@ -39,6 +40,7 @@ public final class ControlledHarness {
     private final Path declaredTarget;
     private final Config config;
     private final ResponsesClient client;
+    private final boolean executionMode;
     private final TargetBroker broker = new TargetBroker();
     private final SourceBoundary sourceBoundary;
     private final Evidence evidence;
@@ -70,12 +72,19 @@ public final class ControlledHarness {
     /** Optional source designation adds metadata checks only; it does not enable source analysis. */
     public ControlledHarness(Path trustedRoot, Path declaredSource, Path declaredTarget,
                              Config config, ResponsesClient client) {
+        this(trustedRoot, declaredSource, declaredTarget, config, client, false);
+    }
+
+    /** Only the host coordinator creates this profile; legacy foundation entry points stay closed. */
+    ControlledHarness(Path trustedRoot, Path declaredSource, Path declaredTarget,
+                      Config config, ResponsesClient client, boolean executionMode) {
         this.trustedRoot = Objects.requireNonNull(trustedRoot);
         this.declaredSource = declaredSource;
         this.declaredTarget = Objects.requireNonNull(declaredTarget);
         this.sourceBoundary = declaredSource == null ? null : new SourceBoundary();
         this.config = Objects.requireNonNull(config);
         this.client = Objects.requireNonNull(client);
+        this.executionMode = executionMode;
         this.evidence = new Evidence(text -> providerCallback(() -> {
             client.rejectCredentialMaterial(text);
             return null;
@@ -93,7 +102,8 @@ public final class ControlledHarness {
     }
 
     private Map<String, Object> runtimeConfiguration() {
-        return Json.object("harnessVersion", VERSION, "javaRuntimeVersion", Runtime.version().toString(),
+        return Json.object("harnessVersion", VERSION, "executionProfile", executionMode ? "CONTROLLED_SEQUENTIAL_V1" : "FOUNDATION_ONLY",
+                "javaRuntimeVersion", Runtime.version().toString(),
                 "controlMode", "FIXED_TRUSTED_CONTEXT", "launchMechanism", "RESPONSES_SAME_CONTEXT_SEQUENTIAL",
                 "startupCwd", startupCwd, "trustedRootDesignation", trustedRoot.toString(),
                 "sourceRootDesignation", declaredSource == null ? null : declaredSource.toString(),
@@ -133,7 +143,7 @@ public final class ControlledHarness {
                     evidence.append("SOURCE_METADATA_REGISTERED", metadata.view());
                     require(State.INITIALIZED);
                 }
-                var frozen = TrustedInputs.freeze(trustedRoot, declaredTarget);
+                var frozen = TrustedInputs.freeze(trustedRoot, declaredTarget, executionMode);
                 if (sourceBoundary != null) sourceBoundary.verify();
                 evidence.safe(frozen.instructions());
                 evidence.append("TRUSTED_INPUTS_FROZEN", Json.object("registry", frozen.registry(),
@@ -187,8 +197,32 @@ public final class ControlledHarness {
     }
 
     private String masterTurn(String previous) {
+        return providerTurn(previous, null, null);
+    }
+
+    /** Host-only transport path. The coordinator, never response data, supplies role and binding. */
+    synchronized String executionTurn(TrustedInputs.Role selectedRole, String expectedPrevious,
+                                      Map<String, Object> binding, Map<String, Object> data,
+                                      Consumer<String> validateStructuredOutput) {
+        beginOperation();
+        try {
+            if (!executionMode || (state != State.TARGET_METADATA_REGISTERED
+                    && state != State.CREATION_EVIDENCE_CAPTURED && state != State.DISCOVERY_GATE_READY))
+                throw stop(State.BLOCKED, "EXECUTION_PROFILE_REQUIRED");
+            if (!Objects.equals(responseId, expectedPrevious)
+                    || !selectedRole.id.equals(binding.get("role")))
+                throw stop(State.FAILED, "EXECUTION_BINDING_MISMATCH");
+            role = selectedRole;
+            roleSwitchCounter++;
+            String marker = Json.write(Json.object("format", "HOST_EXECUTION_TURN_V1", "binding", binding,
+                    "data", Json.object("format", "UNTRUSTED_DATA_V1", "value", data)));
+            return providerTurn(responseId, marker, Objects.requireNonNull(validateStructuredOutput));
+        } finally { operationActive = false; }
+    }
+
+    private String providerTurn(String previous, String executionMarker, Consumer<String> validateStructuredOutput) {
         verifyActive();
-        if (requestInFlight || role != TrustedInputs.Role.MASTER)
+        if (requestInFlight || (executionMarker == null && role != TrustedInputs.Role.MASTER))
             throw stop(State.BLOCKED, "INVALID_TURN");
         requestInFlight = true;
         readbackCaptured = false;
@@ -196,7 +230,7 @@ public final class ControlledHarness {
         String stage = "CREATE";
         try {
             int ordinal = lineage.size() + 1;
-            String marker = "HOST_TURN logicalContext=" + contextId + " ordinal=" + ordinal
+            String marker = executionMarker != null ? executionMarker : "HOST_TURN logicalContext=" + contextId + " ordinal=" + ordinal
                     + " role=" + role.id + " purpose=CONTROL_CONTEXT_ONLY; acknowledge readiness for host evidence review."
                     + " Do not start specialist execution or claim a discovery gate PASS.";
             var metadata = Json.object("host_context", contextId, "host_turn", Integer.toString(ordinal),
@@ -225,16 +259,24 @@ public final class ControlledHarness {
             // This is exactly the immutable body exposed by inspect(); no adapter-side reassembly.
             String raw = client.create(activeRequest.body());
             ensureUsable();
+            if (raw == null || raw.length() > 4 * 1024 * 1024)
+                throw new IllegalArgumentException("RESPONSE_BODY_LIMIT");
             evidence.safe(raw);
-            evidence.append("RESPONSE_CREATED_READOUT", Json.object("ordinal", ordinal, "rawBody", raw));
             Map<String, Object> created = validateResponse(raw, request, null);
+            if (validateStructuredOutput != null) validateStructuredOutput.accept(structuredText(created));
+            ensureUsable();
             String returnedId = (String) created.get("id");
             if (lineage.stream().anyMatch(link -> returnedId.equals(link.get("responseId"))))
                 throw new IllegalArgumentException("RESPONSE_ID_REUSED");
+            // Check every ID before retaining any part of a conflicting response.
             for (Object output : (List<?>) created.get("output")) {
                 Map<?, ?> item = (Map<?, ?>) output;
                 if (providerItems.containsKey((String) item.get("id")))
                     throw new IllegalArgumentException("PROVIDER_OUTPUT_ID_REUSED");
+            }
+            evidence.append("RESPONSE_CREATED_READOUT", Json.object("ordinal", ordinal, "rawBody", raw));
+            for (Object output : (List<?>) created.get("output")) {
+                Map<?, ?> item = (Map<?, ?>) output;
                 bindProviderItem(item, "OUTPUT", returnedId);
             }
             ensureUsable();
@@ -246,12 +288,14 @@ public final class ControlledHarness {
             stage = "READBACK";
             String retrievedRaw = client.retrieve(responseId);
             ensureUsable();
+            if (retrievedRaw == null || retrievedRaw.length() > 4 * 1024 * 1024)
+                throw new IllegalArgumentException("RESPONSE_BODY_LIMIT");
             evidence.safe(retrievedRaw);
-            evidence.append("RESPONSE_RETRIEVED", Json.object("responseId", responseId, "rawBody", retrievedRaw));
             var retrieved = validateResponse(retrievedRaw, request, responseId);
             if (!Objects.equals(created.get("output"), retrieved.get("output"))
                     || !Objects.equals(created.get("created_at"), retrieved.get("created_at")))
                 throw new IllegalArgumentException("RESPONSE_READBACK_CHANGED");
+            evidence.append("RESPONSE_RETRIEVED", Json.object("responseId", responseId, "rawBody", retrievedRaw));
             captureInputItems();
             verifyActive();
             readbackCaptured = true;
@@ -267,6 +311,41 @@ public final class ControlledHarness {
                     : "API_READBACK_OR_CORRELATION_FAILED");
         } finally { requestInFlight = false; }
     }
+
+    private static String structuredText(Map<String, Object> response) {
+        List<String> texts = new ArrayList<>();
+        for (Object itemValue : (List<?>) response.get("output")) {
+            Map<?, ?> item = (Map<?, ?>) itemValue;
+            if (!"message".equals(item.get("type"))) continue;
+            for (Object partValue : (List<?>) item.get("content")) {
+                Map<?, ?> part = (Map<?, ?>) partValue;
+                if (!"output_text".equals(part.get("type")))
+                    throw new IllegalArgumentException("STRUCTURED_RESPONSE_REQUIRED");
+                texts.add((String) part.get("text"));
+            }
+        }
+        if (texts.size() != 1) throw new IllegalArgumentException("ONE_STRUCTURED_RESPONSE_REQUIRED");
+        return texts.getFirst();
+    }
+
+    synchronized SourceBoundary executionSourceBoundary() {
+        if (!executionMode) throw new IllegalStateException("EXECUTION_PROFILE_REQUIRED");
+        return sourceBoundary;
+    }
+
+    synchronized TargetBroker executionTargetMetadata() {
+        if (!executionMode) throw new IllegalStateException("EXECUTION_PROFILE_REQUIRED");
+        return broker;
+    }
+
+    synchronized TrustedInputs executionTrustedInputs() {
+        if (!executionMode || trusted == null) throw new IllegalStateException("EXECUTION_PROFILE_REQUIRED");
+        return trusted;
+    }
+
+    synchronized void verifyExecutionBoundary() { verifyActive(); }
+
+    synchronized String executionContextId() { return contextId; }
 
     private Map<String, Object> validateResponse(String raw, Map<String, Object> request, String expectedId) {
         var response = Json.parse(raw);

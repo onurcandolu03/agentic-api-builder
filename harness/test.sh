@@ -28,3 +28,6 @@ javac --release 21 -cp "$harness_classpath" -d "$harness_temp/classes" \
   "$harness_root"/test/dev/agentic/harness/*.java
 java -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.HarnessTest "$harness_temp"
 java -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.SourceContractTest "$harness_root/.." "$harness_temp"
+java -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.ArtifactContractTest
+java -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.BrokerTest "$harness_temp"
+java -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.RuntimeTest "$harness_temp" "$harness_root/.."

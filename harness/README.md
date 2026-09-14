@@ -1,7 +1,116 @@
-# Controlled Responses harness foundation
+# Controlled Responses harness
 
-This isolated Java 21 library supplies host evidence for a **future** pre-analysis
-instruction-discovery review. It does not run the migration workflow, implement
+## Current execution runtime
+
+`ControlledPipeline` adds a non-interactive, in-memory `SOURCE_TO_TARGET` route:
+MASTER registration and gate acceptance → 00 → MASTER acceptance → 01 → MASTER
+acceptance → 02 → MASTER acceptance → MASTER reports blocked preflight.
+`RuntimeTest` exercises this route using the actual ten explicitly selected
+trusted documents, mocked `ResponsesClient` responses, and temporary source and
+target fixtures. This is an offline execution proof, not live provider E2E.
+
+The default pipeline stops with `BLOCKED` and
+`VALIDATION_EXECUTION_POLICY_AND_OBLIGATION_MECHANISM_REQUIRED`. It issues no
+implementation or validation invocation, mutation grant, `STEP_ACCEPTED`, or
+run-authority bundle. Separately supplied static authority remains exact
+`CALLER_RESOLUTION` data; a plan compatible with the partial static machinery
+still stops at `CANONICAL_IMPLEMENTATION_ACCEPTANCE_UNAVAILABLE`. Unsupported
+plans fail or block at their earlier gate. Validation feasibility and canonical
+implementation acceptance must be integrated before any pipeline mutation.
+
+The public Java entry point accepts explicit trusted root, `MigrationInput`,
+`ControlledHarness.Config`, and a host-supplied `ResponsesClient`.
+`ControlledPipeline.runJson(...)` blocks missing routing before provider access.
+There is no live CLI or credential loading in this launcher. `MigrationInput`
+reuses cached Jackson JSON parsing, preserves exact caller UTF-8 bytes and their
+fingerprint, and retains unknown structured fields, including decimal values.
+It recognizes `migration.settings.sourceProjectPath`, `targetProjectPath`, and
+`sourceOperationName` (also their flat equivalents). Additional fields remain
+caller data for specialists; they do not grant runtime authority. A safe YAML
+adapter remains future launcher work. No dependencies were added.
+
+`RoleExecutor` selects exactly one registered role per invocation. Its outer
+`HOST_EXECUTION_TURN_V1` binding records session/run, invocation, predecessor
+invocation, previous provider response, global turn ordinal, trusted assembly and
+role fingerprints, and input artifact fingerprints. Every provider create
+explicitly resends the fixed trusted instructions. `previous_response_id` only
+correlates conversation state. The existing create/retrieve/input-item checks
+still reject changed configuration, reordered or unknown history, and reused
+provider identities. Role selection, tool requests and replies are strict JSON;
+artifact text preserves legal whitespace rather than being treated as an
+identifier. Structured output is validated before transport retention; readback
+must finish before tool execution or artifact handoff.
+
+`ExecutionGates` retains canonical source/discovery declarations and checks over
+the actual host configuration, trusted registry, launch selection, current
+request binding and response lineage. MASTER receives the underlying observed
+materials as well as their fingerprints. Checks describe this host route and
+current session; mock responses are not provider authentication or attestation.
+The initial registration turn has no content access. Accepted gates enable
+separate content brokers without changing `TargetBroker`'s original transitions.
+
+`SourceBroker` exposes bounded text reads, single-directory listings,
+single-file literal searches and metadata to 00 only. It has no write method.
+`TargetContentBroker` allows target analysis reads to 01; 02 has no repository
+operations. Both verify the exact active invocation and root identity, reject
+traversal, aliases, symlinks and regular-file hardlinks, and return explicitly
+untrusted data. Package-private target CREATE/MODIFY helpers require host-issued
+exact path/action/before-state grants and role ownership; broker tests exercise
+them independently. **The pipeline never grants these writes.** These helpers
+do not themselves establish accepted plan or prerequisite authority. No shell,
+subprocess, network, Git mutation, delete, rename or directory-creation operation
+is exposed. Broker denials close access permanently.
+
+Default bounds are 1 MiB per file, 2,048 entries, 128 search hits, 64 operations
+and 4 MiB returned per invocation, 16 MiB per snapshot, and 96 provider turns per
+session. Exceeding a bound rejects the operation with incomplete/unavailable
+evidence; results are never silently truncated. Filesystem support is a bounded
+POSIX, ASCII-relative-path, non-Git subset. Unicode relative names and Git
+observations are unavailable. These are point-in-time checks, with no exclusive
+writer control or race-free confinement claim.
+
+`ArtifactContracts` validates analyst/planner schemas, identities, references and
+status coherence. `ArtifactStore` retains exact bytes, fingerprints, provider and
+invocation correlation, predecessor bindings and MASTER acceptance IDs. Candidate
+receipt supplies no acceptance credit. BLOCKED/FAILED source output stops
+dependent phases; validated nonaccepted output and MASTER rejection reasons
+remain separately labelled for the caller. Repository snapshots before analysis,
+at acceptance and at termination retain modeled observable effects. Unexpected
+drift fails acceptance; unavailable terminal observation stays UNKNOWN.
+
+The execution profile treats non-null coverage counts as exact unique-path counts
+within the active invocation: `filesDiscovered` includes files listed, inspected
+as metadata, read, or searched; `filesInspected` includes content reads/searches.
+Repeated operations count once. Area `sampleSize` counts its `inspectedPaths`;
+other or unavailable sampling units use the contracts' permitted `null` value.
+Declared target modules and source/test/resource roots require observed directories.
+`modulesDiscovered` counts distinct declared module directories;
+`modulesInspected` counts those containing actual host content observations,
+independent of artifact `evidenceIds`. Containment compares path components;
+the root module `""` includes repository content observations.
+These accounting rules are supplied with each specialist task. Directory presence
+never grants file-content inspection credit. A validated, retained specialist FAILED
+is latched before MASTER stop handling; subsequent stop failures remain separate
+diagnostics and cannot replace its primary terminal status/code.
+
+`ExecutionPlan`, `ExecutionEvidence` and `ImplementationHandoff` also contain
+unfinished post-planning machinery preserved from this milestone. It is not
+connected to implementation dispatch and has not been proven as a complete
+canonical mutation/validation engine. Its presence does not make 03–07 executable.
+
+Run `bash harness/test.sh` to compile the isolated Java harness and execute all
+five groups: `HarnessTest`, `SourceContractTest`, `ArtifactContractTest`,
+`BrokerTest`, and `RuntimeTest`. Tests use mocks and temporary fixtures only;
+they do not resolve dependencies, execute project build scripts or call an API.
+
+## Original FOUNDATION_ONLY profile (still supported)
+
+The remainder of this document describes the original `FOUNDATION_ONLY` profile
+unless explicitly stated otherwise. The current `ControlledPipeline` execution
+profile and its supported brokers/gates are described above.
+
+`FOUNDATION_ONLY` supplies host evidence for a subsequent pre-analysis
+instruction-discovery review. This profile does not run the migration workflow, implement
 MASTER's acceptance predicates, issue `DISCOVERY_CONTROL_CHECK_V1`, or authorize
 source or target content access. There is deliberately no executable live launcher.
 
@@ -38,16 +147,16 @@ exists. Every continuation explicitly includes the identical `instructions`
 payload and uses the retained `previous_response_id`. There is no resume/import
 operation and no fallback to a new context.
 
-The registered model tool list is intentionally empty. Inspection is currently a
+In `FOUNDATION_ONLY`, the registered model tool list is intentionally empty. Inspection is a
 direct host interface. Function dispatch and model-visible target data tools are
 future work, requiring their own protocol integration. Changing roles prepares
 the next sequential role within the same logical context; execution of every
-specialist remains blocked in this milestone. Role selection never grants plan,
+specialist remains blocked in this profile. Role selection never grants plan,
 dispatch, source-read, target-read, mutation, or validation authority.
 
 ## Metadata and access
 
-Access starts `CLOSED`. The explicit host metadata route alone can enter
+In `FOUNDATION_ONLY`, access starts `CLOSED`. The explicit host metadata route alone can enter
 `METADATA_ONLY`. Content reads, mutation, and validation remain unavailable even
 after local `DISCOVERY_GATE_READY`. A denied transition closes the broker and
 terminates the harness; neither can silently reopen.
@@ -73,7 +182,7 @@ and exact metadata fingerprints are retained in host configuration/evidence and
 inspection, separately from target metadata. Source files, including AGENTS-like
 files, cannot extend the trusted chain.
 
-This implements a testable source metadata boundary only. It does not emit an
+`FOUNDATION_ONLY` implements a testable source metadata boundary only. It does not emit an
 accepted `SOURCE_READ_ONLY_CONTROL_V1` declaration or `SOURCE_ACCESS_CHECK_V1`
 PASS, establish source discovery control,
 or supply a source content broker. It does not run agent 00 or produce
@@ -201,12 +310,15 @@ sources, run project tests, execute a migration role, or call the network. Fixtu
 are created beneath `/private/tmp` when available (otherwise canonical `/tmp`),
 outside any real target. No API key is required or read by these tests.
 
-## Remaining work
+## FOUNDATION_ONLY limitations
 
 Live runtime evidence, canonical declaration/check construction and MASTER
 acceptance, accepted gate delivery to specialists, migration authority bundles,
 specialist dispatch, source and target content tools, mutation, validation, crash recovery,
-and durable evidence storage are outside this milestone. Local readiness means
+and durable evidence storage are outside `FOUNDATION_ONLY`. The current execution
+profile implements the analysis/planning subset described above; 03–07, pipeline
+mutation authority, live E2E, the YAML adapter, Git-state support, and durability/resume
+remain unavailable. Local foundation readiness means
 the retained MASTER creation/readback and fresh host observations are available
 for that later review. It does not mean the discovery gate passed or E2E is ready.
 
