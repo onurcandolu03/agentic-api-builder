@@ -51,8 +51,9 @@ public final class RuntimeTest {
         catch (Throwable failure) { throw new AssertionError("Runtime check failed: " + name, failure); }
     }
     static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
-    private record Fixture(Path trusted, Path source, Path target, MigrationInput input) {}
-    private static Fixture fixture() throws Exception {
+    record Fixture(Path trusted, Path source, Path target, MigrationInput input) {}
+    private static Fixture fixture() throws Exception { return fixture(temp); }
+    static Fixture fixture(Path temp) throws Exception {
         Path root = Files.createTempDirectory(temp, "runtime-");
         Path trusted = Files.createDirectory(root.resolve("trusted"));
         Path source = Files.createDirectory(root.resolve("source")), target = Files.createDirectory(root.resolve("target"));
@@ -500,7 +501,7 @@ public final class RuntimeTest {
         inventory.put("filesInspected", content.size()); inventory.put("filesDiscovered", discovered.size());
     }
 
-    private static Map<String,Object> pipelineAnswer(Map<String,Object> turn, Fixture fixture) {
+    static Map<String,Object> pipelineAnswer(Map<String,Object> turn, Fixture fixture) {
         String role = (String)map(turn.get("binding")).get("role"); var data = data(turn);
         if (role.equals("MASTER")) return envelope(turn, "DECISION", null, null, null, data.get("proposedDecision"), List.of());
         if (role.equals("00-source-analysis") || role.equals("01-target-analysis")) {
@@ -531,7 +532,7 @@ public final class RuntimeTest {
         }
         throw new AssertionError("Runtime dispatched unavailable role " + role);
     }
-    private static Map<String,Object> artifact(Map<String,Object> turn, String role, Map<String,Object> value) {
+    static Map<String,Object> artifact(Map<String,Object> turn, String role, Map<String,Object> value) {
         String exact = " \n" + Json.write(value) + "\n";
         return envelope(turn, "ARTIFACT", exact, Json.fingerprint(role, exact.getBytes(StandardCharsets.UTF_8)), null, null, List.of());
     }

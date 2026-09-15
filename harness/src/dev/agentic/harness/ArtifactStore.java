@@ -17,6 +17,7 @@ final class ArtifactStore {
         }
     }
     private final Map<String,Artifact> accepted = new LinkedHashMap<>();
+    private final List<Map<String,Object>> acceptedReferences = new ArrayList<>();
     private final Evidence evidence;
 
     ArtifactStore(Evidence evidence) { this.evidence = evidence; }
@@ -30,8 +31,11 @@ final class ArtifactStore {
                 Json.object("binding", binding).get("binding") instanceof Map<?,?> map
                         ? ExecutionPlan.map(map) : null,
                 providerResponseId, masterInvocationId, masterResponseId);
-        evidence.append("ANALYSIS_OR_PLAN_ACCEPTED", value.view());
+        evidence.append(role.startsWith("IMPLEMENTATION_RESULT:") ? "IMPLEMENTATION_RESULT_ACCEPTED" : "ANALYSIS_OR_PLAN_ACCEPTED", value.view());
         accepted.put(role, value);
+        acceptedReferences.add(Json.object("role", role, "fingerprint", value.fingerprint(),
+                "invocationId", binding.get("invocationId"), "acceptanceStatus", "ACCEPTED",
+                "acceptanceInvocationId", masterInvocationId));
     }
 
     Artifact required(String role) {
@@ -47,6 +51,8 @@ final class ArtifactStore {
         return Collections.unmodifiableMap(result);
     }
     List<Map<String,Object>> views() { verify(); return accepted.values().stream().map(Artifact::view).toList(); }
+    /** Previously screened acceptance facts, independent of subsequent journal/export availability. */
+    List<Map<String,Object>> terminalReferences() { return List.copyOf(acceptedReferences); }
     List<Map<String,Object>> fingerprints() {
         verify(); return accepted.values().stream().map(Artifact::fingerprint).toList();
     }

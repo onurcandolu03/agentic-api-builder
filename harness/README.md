@@ -4,19 +4,26 @@
 
 `ControlledPipeline` adds a non-interactive, in-memory `SOURCE_TO_TARGET` route:
 MASTER registration and gate acceptance → 00 → MASTER acceptance → 01 → MASTER
-acceptance → 02 → MASTER acceptance → MASTER reports blocked preflight.
-`RuntimeTest` exercises this route using the actual ten explicitly selected
-trusted documents, mocked `ResponsesClient` responses, and temporary source and
-target fixtures. This is an offline execution proof, not live provider E2E.
+acceptance → 02 → MASTER acceptance → implementation preflight and MASTER acceptance
+→ 03 domain/contracts → MASTER step acceptance → 04 persistence/mapping → MASTER
+step acceptance → 05 service/API → MASTER step acceptance → 06 tests → MASTER step
+acceptance → `BLOCKED: VALIDATION_EXECUTION_RUNTIME_REQUIRED`.
+`ImplementationRuntimeTest` exercises this route using the actual ten explicitly
+selected trusted documents, mocked `ResponsesClient` responses, and temporary
+source and target repositories. This is an offline execution proof. Live provider
+E2E remains unproven; this is not a production-readiness claim.
 
-The default pipeline stops with `BLOCKED` and
-`VALIDATION_EXECUTION_POLICY_AND_OBLIGATION_MECHANISM_REQUIRED`. It issues no
-implementation or validation invocation, mutation grant, `STEP_ACCEPTED`, or
-run-authority bundle. Separately supplied static authority remains exact
-`CALLER_RESOLUTION` data; a plan compatible with the partial static machinery
-still stops at `CANONICAL_IMPLEMENTATION_ACCEPTANCE_UNAVAILABLE`. Unsupported
-plans fail or block at their earlier gate. Validation feasibility and canonical
-implementation acceptance must be integrated before any pipeline mutation.
+The executable subset requires exactly one CREATE/MODIFY file for each of 03–06,
+in that order, with distinct exact paths, unambiguous semantic role ownership,
+safe existing parent directories and complete prerequisite/test traceability.
+`ExecutionPlan` derives assignments from the exact MASTER-accepted migration
+plan. The existing separately supplied `CALLER_RESOLUTION` static authority binds
+each responsibility to host-selected expected UTF-8 bytes for independent checks;
+model assertions cannot supply these predicates. Missing static authority still
+blocks at `VALIDATION_EXECUTION_POLICY_AND_OBLIGATION_MECHANISM_REQUIRED`.
+Unsupported ownership, paths, contracts or prerequisites block/fail before the
+first grant. Preflight captures the target baseline and verifies source and target
+are unchanged. No validation policy or 07 execution capability is asserted.
 
 The public Java entry point accepts explicit trusted root, `MigrationInput`,
 `ControlledHarness.Config`, and a host-supplied `ResponsesClient`.
@@ -36,7 +43,9 @@ role fingerprints, and input artifact fingerprints. Every provider create
 explicitly resends the fixed trusted instructions. `previous_response_id` only
 correlates conversation state. The existing create/retrieve/input-item checks
 still reject changed configuration, reordered or unknown history, and reused
-provider identities. Role selection, tool requests and replies are strict JSON;
+provider identities. Execution inspection summarizes those items by exact
+fingerprint; the live identity registry and retained readback still hold the full
+items. Role selection, tool requests and replies are strict JSON;
 artifact text preserves legal whitespace rather than being treated as an
 identifier. Structured output is validated before transport retention; readback
 must finish before tool execution or artifact handoff.
@@ -54,10 +63,15 @@ single-file literal searches and metadata to 00 only. It has no write method.
 `TargetContentBroker` allows target analysis reads to 01; 02 has no repository
 operations. Both verify the exact active invocation and root identity, reject
 traversal, aliases, symlinks and regular-file hardlinks, and return explicitly
-untrusted data. Package-private target CREATE/MODIFY helpers require host-issued
-exact path/action/before-state grants and role ownership; broker tests exercise
-them independently. **The pipeline never grants these writes.** These helpers
-do not themselves establish accepted plan or prerequisite authority. No shell,
+untrusted data. The source remains permanently read-only and only 00 can read it.
+The pipeline issues target CREATE/MODIFY grants only after accepted-plan preflight.
+Each immutable grant binds a unique ID, run, exact accepted source/target/plan
+fingerprints, role, step, invocation, predecessor acceptance, canonical dispatch,
+target root identity, exact path/action and observed before-state. Write requests
+must name the current grant ID and expected content fingerprint (null for CREATE).
+The broker rejects wrong bindings, replay, stale state and root/path substitution,
+and retains exact after bytes and observed states before returning the receipt.
+Implementation reads are confined to the assigned grant path. No shell,
 subprocess, network, Git mutation, delete, rename or directory-creation operation
 is exposed. Broker denials close access permanently.
 
@@ -93,15 +107,47 @@ never grants file-content inspection credit. A validated, retained specialist FA
 is latched before MASTER stop handling; subsequent stop failures remain separate
 diagnostics and cannot replace its primary terminal status/code.
 
-`ExecutionPlan`, `ExecutionEvidence` and `ImplementationHandoff` also contain
-unfinished post-planning machinery preserved from this milestone. It is not
-connected to implementation dispatch and has not been proven as a complete
-canonical mutation/validation engine. Its presence does not make 03–07 executable.
+`ExecutionEvidence` supplies canonical dispatches, prerequisite proofs, independent
+exact-file obligation audits, candidate step acceptance and the accepted ledger.
+`ImplementationHandoff` validates the existing trusted specialist SUCCESS schema.
+The strict implementation result wrapper contains `resultVersion: 1`, the exact
+`migrationPlanFingerprint`, `predecessorAcceptance`, `grantEffects`, and `handoff`.
+Every grant effect includes grant ID, role, invocation, path, action, and full
+before/after states with content fingerprints. The host compares the complete
+claimed effect set against broker observations, checks source immutability and
+the entire modeled target state, then asks MASTER to accept the step. Only that
+acceptance makes the exact result an `ArtifactStore` handoff and the canonical
+step eligible as a prerequisite. Malformed or inconsistent results never reach
+MASTER acceptance.
+
+During 00–02 both repositories must remain unchanged. During implementation the
+expected target state is the original baseline plus broker-observed authorized
+writes. External changes never become a new baseline. On filesystems where a CREATE
+increments its immediate parent directory link count, that exact one-link metadata
+transition is observed and retained with the write; all other parent fields must
+remain equal. Directory mutation authority is never issued. Boundaries report
+`EXPECTED_EFFECT`, `UNEXPECTED_EFFECT`, or `UNKNOWN`; observable unexpected effects
+stop execution. Final reports retain actual snapshots and mutation evidence.
+MASTER rejection or malformed output leaves applied files in place and records
+them as unaccepted; no rollback is claimed. These are point-in-time modeled-state
+checks, without exclusive writer control or detection of transient changes that
+are restored between observations.
+
+Final implementation reports inspect each immutable host journal record separately
+and inspect the remaining report fields together. Every record keeps its field
+context and all existing scanner limits; individual model artifacts are never
+split. This prevents repeated aggregate history from exhausting one inspection
+budget without removing credential checks or exact retained evidence.
+
+07 remains unavailable in `ControlledPipeline`, including after all four step
+acceptances. Pre-existing isolated static-validation helpers are not dispatched
+by this route. There is no validation command runner or live E2E proof.
 
 Run `bash harness/test.sh` to compile the isolated Java harness and execute all
-five groups: `HarnessTest`, `SourceContractTest`, `ArtifactContractTest`,
-`BrokerTest`, and `RuntimeTest`. Tests use mocks and temporary fixtures only;
-they do not resolve dependencies, execute project build scripts or call an API.
+six groups: `HarnessTest`, `SourceContractTest`, `ArtifactContractTest`,
+`BrokerTest`, `RuntimeTest`, and `ImplementationRuntimeTest`. Tests use mocks and
+temporary fixtures only; they do not resolve dependencies, execute project build
+scripts or call an API.
 
 ## Original FOUNDATION_ONLY profile (still supported)
 
@@ -297,17 +343,17 @@ From this repository, run only:
 bash harness/test.sh
 ```
 
-This compiles the harness and runs `HarnessTest` and `SourceContractTest` in an
-isolated temporary directory. Runtime checks use mocked transports and fixture
+This compiles the harness and runs all six check groups in an isolated temporary
+directory. Runtime checks use mocked transports and fixture
 repositories. Contract checks parse the authoritative Markdown JSON structures,
 check normative rules and exact trusted fingerprints, and verify that variable
 caller data is representable. They also scan the complete current `MASTER.md`
 and freeze the actual ten-document trusted chain through the public host path,
 with transport methods that fail if called. They do not execute source discovery
-or planning.
+or planning themselves; the runtime groups execute the mocked controlled route.
 The script does not invoke Maven/Gradle, compile application
-sources, run project tests, execute a migration role, or call the network. Fixtures
-are created beneath `/private/tmp` when available (otherwise canonical `/tmp`),
+sources, run project tests, execute target code, or call the network. Fixtures
+are created beneath the canonical `${TMPDIR:-/tmp}` directory,
 outside any real target. No API key is required or read by these tests.
 
 ## FOUNDATION_ONLY limitations
@@ -316,9 +362,8 @@ Live runtime evidence, canonical declaration/check construction and MASTER
 acceptance, accepted gate delivery to specialists, migration authority bundles,
 specialist dispatch, source and target content tools, mutation, validation, crash recovery,
 and durable evidence storage are outside `FOUNDATION_ONLY`. The current execution
-profile implements the analysis/planning subset described above; 03–07, pipeline
-mutation authority, live E2E, the YAML adapter, Git-state support, and durability/resume
-remain unavailable. Local foundation readiness means
+profile implements the mocked 00–06 route described above; 07 execution, live E2E,
+the YAML adapter, Git-state support, and durability/resume remain unavailable. Local foundation readiness means
 the retained MASTER creation/readback and fresh host observations are available
 for that later review. It does not mean the discovery gate passed or E2E is ready.
 

@@ -24,7 +24,12 @@ public final class ControlledPipeline {
     private ExecutionGates gates;
     private SourceBroker source;
     private TargetContentBroker target;
-    private RepositoryFiles.Snapshot sourceBaseline, targetCurrent;
+    private RepositoryFiles.Snapshot sourceBaseline, targetBaseline, targetCurrent;
+    private ExecutionEvidence implementation;
+    private ExecutionEvidence.Dispatch activeDispatch;
+    private String activeImplementationText;
+    private String activeImplementationOutcome = "INTERRUPTED_OR_NO_RESPONSE";
+    private boolean mutationAuthorityIssued;
     private Map<String,Object> finalEffects;
     private Map<String,Object> bundleFingerprint;
     private boolean started, terminal;
@@ -34,7 +39,7 @@ public final class ControlledPipeline {
                               ResponsesClient client) {
         this(trustedRoot, input, config, client, null);
     }
-    /** Optional exact caller resolution is preserved for preflight; implementation remains unavailable. */
+    /** Optional exact caller resolution supplies independent exact-file implementation predicates. */
     public ControlledPipeline(Path trustedRoot, MigrationInput input, ControlledHarness.Config config,
                               ResponsesClient client, byte[] staticResolution) {
         this.trustedRoot = Objects.requireNonNull(trustedRoot); this.input = Objects.requireNonNull(input);
@@ -103,6 +108,7 @@ public final class ControlledPipeline {
                 throw new Halt("BLOCKED", "SOURCE_GIT_OBSERVATION_UNAVAILABLE");
             sourceBaseline = source.hostSnapshot(Set.of());
             targetCurrent = target.hostSnapshot(Set.of());
+            targetBaseline = targetCurrent;
             recordObservation("PRE_ANALYSIS", sourceBaseline, targetCurrent);
             analyze(TrustedInputs.Role.SOURCE_ANALYSIS, "SOURCE_ANALYSIS", "source-analysis.json");
             analyze(TrustedInputs.Role.ANALYSIS, "TARGET_ANALYSIS", "target-analysis.json");
@@ -121,6 +127,7 @@ public final class ControlledPipeline {
             if (harness != null) harness.close();
             if (specialistFailure != null) { status = specialistFailure.status; code = specialistFailure.code; }
         }
+        Map<String,Object> terminalSummary = terminalSummary();
         Map<String,Object> report;
         try {
             report = Json.object("status", status, "code", code, "migrationMode", "SOURCE_TO_TARGET",
@@ -129,22 +136,76 @@ public final class ControlledPipeline {
                     "acceptedArtifacts", artifacts.views(), "nonacceptedOutputs", nonacceptedOutputs,
                     "orchestrationFailures", orchestrationFailures,
                     "finalRepositoryEffects", finalEffects,
+                    "terminalSummary", terminalSummary, "validationExecuted", false,
+                    "implementationLedger", implementation == null ? List.of() : implementation.ledger(),
                     "gateArtifacts", gates == null ? null : gates.delivery(),
                     "evidence", evidence.snapshot(), "realProviderE2EProven", false,
                     "limitations", List.of("CURRENT_SESSION_IN_MEMORY", "POINT_IN_TIME_FILESYSTEM_CHECKS",
                             "NO_PROCESS_OR_NETWORK_TOOLS", "NO_GIT_STATE_IMPLEMENTATION", "NO_LIVE_PROVIDER_VERIFICATION"));
-            evidence.safe(Json.write(report));
+            screenFinalReport(report);
         } catch (RuntimeException rejected) {
-            status = "FAILED"; code = specialistFailure == null ? "FINAL_EVIDENCE_UNAVAILABLE" : specialistFailure.code;
             List<Map<String,Object>> fallbackFailures = new ArrayList<>(orchestrationFailures);
             // Existing entries were screened before retention (or are fixed host diagnostics).
             // Preserve those without copying any of the rejected report or exception payload.
             fallbackFailures.add(Json.object("stage", "FINAL_REPORT", "code", "FINAL_EVIDENCE_UNAVAILABLE"));
-            report = Json.object("status", status, "code", code, "realProviderE2EProven", false,
-                    "orchestrationFailures", fallbackFailures);
+            Map<String,Object> fallback = new LinkedHashMap<>(terminalSummary);
+            fallback.put("orchestrationFailures", fallbackFailures);
+            report = map(Json.object("summary", fallback).get("summary"));
         }
         terminal = true;
         return new Result(status, code, report);
+    }
+
+    /** Only host facts and previously screened identifiers; no report, journal or model text. */
+    private Map<String,Object> terminalSummary() {
+        List<Map<String,Object>> accepted = artifacts.terminalReferences();
+        List<Map<String,Object>> mutations = new ArrayList<>(), nonaccepted = new ArrayList<>();
+        if (target != null) for (var mutation : target.mutationEvidence()) {
+            var grant = map(mutation.get("grant"));
+            Object invocation = grant.get("invocationId");
+            var acceptedResult = accepted.stream().filter(a -> invocation.equals(a.get("invocationId"))).findFirst();
+            var candidate = nonacceptedOutputs.stream().filter(a -> invocation.equals(a.get("invocationId"))).findFirst();
+            Map<String,Object> reference = Json.object("role", grant.get("role"), "invocationId", invocation,
+                    "acceptanceStatus", acceptedResult.isPresent() ? "ACCEPTED" : "NOT_ACCEPTED",
+                    "fingerprint", acceptedResult.map(a -> a.get("fingerprint"))
+                            .orElseGet(() -> candidate.map(a -> a.get("fingerprint")).orElse(null)));
+            if (acceptedResult.isEmpty()) nonaccepted.add(reference);
+            mutations.add(Json.object("grantId", grant.get("grantId"), "role", grant.get("role"),
+                    "invocationId", invocation, "pathKey", grant.get("pathKey"), "action", grant.get("action"),
+                    "grantFingerprint", Json.evidenceFingerprint(grant),
+                    "beforeStateFingerprint", Json.evidenceFingerprint(mutation.get("beforeState")),
+                    "afterStateFingerprint", Json.evidenceFingerprint(mutation.get("afterState")),
+                    "parentMetadataEffectFingerprint", mutation.get("parentMetadataEffect") == null ? null
+                            : Json.evidenceFingerprint(mutation.get("parentMetadataEffect")),
+                    "resultReference", reference));
+        }
+        Map<String,Object> effects = new LinkedHashMap<>();
+        for (String field : List.of("observation", "sourceUnchanged", "targetUnchanged", "mutationAuthorityIssued",
+                "effectClassification", "targetMatchesAuthorizedEffects", "sourceObservation", "targetObservation"))
+            effects.put(field, finalEffects.get(field));
+        effects.put("authorizedMutations", mutations);
+        for (String field : List.of("actualSource", "actualTarget"))
+            effects.put(field + "Fingerprint", finalEffects.get(field) == null ? null : Json.evidenceFingerprint(finalEffects.get(field)));
+        effects.put("rollback", "NOT_PERFORMED");
+        return Json.object("runId", roles == null ? null : roles.runId(), "status", status, "code", code,
+                "finalRepositoryEffects", effects, "acceptedArtifacts", accepted, "nonacceptedOutputs", nonaccepted,
+                "validationExecuted", false, "realProviderE2EProven", false,
+                "orchestrationFailures", orchestrationFailures);
+    }
+
+    private void screenFinalReport(Map<String,Object> report) {
+        if (implementation == null) { evidence.safe(Json.write(report)); return; }
+        // These two host-owned journals can together exceed one inspection budget.
+        // Inspect every immutable record, preserving its outer field context. No model
+        // artifact is split, and each record remains subject to all original scanner limits.
+        Map<String,Object> header = new LinkedHashMap<>(report);
+        for (String field : List.of("evidence", "implementationLedger")) {
+            for (Object record : ExecutionPlan.list(report.get(field)))
+                evidence.safe(Json.write(Json.object(field, List.of(record))));
+            header.put(field, List.of());
+        }
+        evidence.safe(Json.write(header));
+        evidence.verify(); checkLive();
     }
 
     private void analyze(TrustedInputs.Role role, String artifactRole, String filename) throws Exception {
@@ -243,7 +304,7 @@ public final class ControlledPipeline {
             throw new IllegalStateException("INITIAL_REGISTRATION_ONLY_WITHOUT_GATES");
         RoleExecutor.Invocation invocation = roles.begin(TrustedInputs.Role.MASTER, bundleFingerprint, authorities(), null);
         Map<String,Object> gateDelivery = gates == null ? null : gates.check(
-                action.equals("ACCEPT_RUNTIME_GATES") ? "INPUT_REGISTRATION" : action.equals("ACCEPT_ARTIFACT")
+                action.equals("ACCEPT_RUNTIME_GATES") ? "INPUT_REGISTRATION" : (action.equals("ACCEPT_ARTIFACT") || action.startsWith("ACCEPT_IMPLEMENTATION"))
                         ? "AUTHORITY_ACCEPTANCE" : "BEFORE_INVOCATION", invocation, authorities(), bundleFingerprint);
         Map<String,Object> proposed = Json.object("action", action, "subjectFingerprint", Json.evidenceFingerprint(details));
         RoleExecutor.Reply reply = roles.turn(invocation, Json.object("proposedDecision", proposed,
@@ -267,6 +328,7 @@ public final class ControlledPipeline {
     private Map<String,Object> executeTool(RoleExecutor.Invocation invocation, Map<String,Object> request,
                                            Map<String,String> observedPaths) throws Exception {
         checkLive(); harness.verifyExecutionBoundary();
+        if (implementation != null) unchanged();
         String scope = (String)request.get("scope"), operation = (String)request.get("operation"), path = (String)request.get("path");
         if (!operations(invocation.role()).contains(operation)) throw new Halt("FAILED", "ROLE_OPERATION_DENIED");
         boolean sourceOperation = scope.equals("SOURCE");
@@ -283,7 +345,11 @@ public final class ControlledPipeline {
                 throw new Halt("FAILED", "TARGET_AUTHORITY_DENIED");
             result = target.execute(invocation.id(), invocation.role().id, operation, path, (String)request.get("query"),
                     request.get("expectedBeforeFingerprint") == null ? null : map(request.get("expectedBeforeFingerprint")),
-                    (String)request.get("content"));
+                    (String)request.get("content"), (String)request.get("grantId"));
+        }
+        if (implementation != null) {
+            targetCurrent = expectedTarget();
+            unchanged();
         }
         if (operation.startsWith("READ_") || operation.startsWith("SEARCH_")) observedPaths.put(path, "CONTENT");
         if (operation.startsWith("LIST_")) {
@@ -375,9 +441,174 @@ public final class ControlledPipeline {
     private void preflightAndImplement() throws Exception {
         if (staticResolution == null) blockedPreflight("VALIDATION_EXECUTION_POLICY_AND_OBLIGATION_MECHANISM_REQUIRED");
         ExecutionPlan.StaticAuthority authority = ExecutionPlan.readStaticAuthority(staticResolution);
-        ExecutionPlan.parse(Json.parse(artifacts.required("MIGRATION_PLAN").text()), authority.rules());
-        // No plan grants or implementation invocation are issued until canonical acceptance is integrated.
-        blockedPreflight("CANONICAL_IMPLEMENTATION_ACCEPTANCE_UNAVAILABLE");
+        // Revalidate the exact accepted artifacts; neither a provider grant nor a fresh plan is an input.
+        ArtifactStore.Artifact acceptedPlan = artifacts.required("MIGRATION_PLAN");
+        Map<String,Object> planData = ArtifactContracts.validate(TrustedInputs.Role.PLANNING, acceptedPlan.bytes(), input, artifacts.bytes());
+        ExecutionPlan plan = ExecutionPlan.parse(planData, authority.rules());
+        List<TrustedInputs.Role> sequence = List.of(TrustedInputs.Role.DOMAIN, TrustedInputs.Role.PERSISTENCE,
+                TrustedInputs.Role.SERVICE, TrustedInputs.Role.TESTS);
+        if (!plan.steps().stream().map(ExecutionPlan.Step::role).toList().equals(sequence))
+            blockedPreflight("EXACT_03_06_SEQUENCE_REQUIRED");
+        unchanged();
+        // Observing every proposed path now also checks safe existing parents, aliases and links.
+        try { target.hostSnapshot(new LinkedHashSet<>(plan.steps().stream().map(ExecutionPlan.Step::path).toList())); }
+        catch (java.io.IOException unavailable) { throw new Halt("BLOCKED", "IMPLEMENTATION_PREFLIGHT_TARGET_UNAVAILABLE"); }
+        plan.validateImplementationTraceability();
+        Map<String,Object> bundle = implementationBundle();
+        var metadata = harness.executionTargetMetadata().metadata();
+        implementation = new ExecutionEvidence(plan, roles.runId(), bundle,
+                Json.object("declaredRoot", metadata.declaredRoot(), "resolvedRoot", metadata.resolvedRoot(),
+                        "repositoryKind", "NON_GIT", "headCommit", null, "semanticIndexStateFingerprint", null), null, evidence);
+        bundleFingerprint = implementation.bundleFingerprint();
+        implementation.preflight(implementation.manifest(targetCurrent));
+        Map<String,Object> preflight = Json.object("runId", roles.runId(), "runAuthorityBundle", bundle,
+                "runAuthorityBundleFingerprint", bundleFingerprint, "sourceBaseline", snapshotView(sourceBaseline),
+                "targetBaseline", snapshotView(targetBaseline), "steps", plan.steps().stream().map(ExecutionPlan.Step::assignment).toList(),
+                "mutationAuthorityIssued", false, "validationExecution", "UNAVAILABLE", "terminalBoundary", "VALIDATION_EXECUTION_RUNTIME_REQUIRED");
+        evidence.append("IMPLEMENTATION_PREFLIGHT", preflight);
+        master("ACCEPT_IMPLEMENTATION_PREFLIGHT", preflight);
+        unchanged();
+        phases.add(Json.object("phase", "WHOLE_PLAN_PREFLIGHT", "status", "PASS"));
+        String predecessor = "MIGRATION_PLAN";
+        for (ExecutionPlan.Step step : plan.steps()) {
+            implement(step, plan, artifacts.required(predecessor));
+            predecessor = "IMPLEMENTATION_RESULT:" + step.id();
+        }
+        unchanged();
+        phases.add(Json.object("phase", "VALIDATION_BOUNDARY", "status", "BLOCKED", "reason", "VALIDATION_EXECUTION_RUNTIME_REQUIRED"));
+        master("STOP_BLOCKED", Json.object("reason", "VALIDATION_EXECUTION_RUNTIME_REQUIRED",
+                "implementation", "03_06_MASTER_ACCEPTED", "validation", "NOT_PERFORMED"));
+        throw new Halt("BLOCKED", "VALIDATION_EXECUTION_RUNTIME_REQUIRED");
+    }
+
+    private Map<String,Object> implementationBundle() {
+        Object contract = harness.executionTrustedInputs().registry().stream().map(v -> map(v.get("artifactFingerprint")))
+                .filter(fp -> "ORCHESTRATION_CONTRACT".equals(fp.get("artifactRole"))).findFirst().orElseThrow();
+        return Json.object("bundleVersion", 1, "bundleKind", "RUN_AUTHORITY_BUNDLE_V1", "migrationMode", "SOURCE_TO_TARGET",
+                "callerMigrationRequestFingerprint", input.fingerprint(), "callerResolutions", List.of(Json.object(
+                        "resolutionReference", "host-static-authority", "resolutionFingerprint", resolutionFingerprint())),
+                "agent00SpecificationFingerprint", roles.specification(TrustedInputs.Role.SOURCE_ANALYSIS),
+                "sourceAnalysisFingerprint", artifacts.required("SOURCE_ANALYSIS").fingerprint(),
+                "agent01SpecificationFingerprint", roles.specification(TrustedInputs.Role.ANALYSIS),
+                "targetAnalysisFingerprint", artifacts.required("TARGET_ANALYSIS").fingerprint(),
+                "agent02SpecificationFingerprint", roles.specification(TrustedInputs.Role.PLANNING),
+                "migrationPlanFingerprint", artifacts.required("MIGRATION_PLAN").fingerprint(),
+                "orchestrationContractFingerprint", contract, "masterSpecificationFingerprint", roles.specification(TrustedInputs.Role.MASTER),
+                "capabilityRegistry", Json.object("registryVersion", 1, "specialists", Arrays.stream(TrustedInputs.Role.values())
+                        .filter(r -> r != TrustedInputs.Role.MASTER).sorted(Comparator.comparing(r -> r.id))
+                        .map(r -> Json.object("specialistRole", r.id, "specificationFingerprint", roles.specification(r))).toList()),
+                "runtimeCapabilities", gates.capabilities().stream().sorted(Comparator.comparing(c -> (String)c.get("capabilityId"))).toList());
+    }
+
+    private void implement(ExecutionPlan.Step step, ExecutionPlan plan, ArtifactStore.Artifact predecessor) throws Exception {
+        unchanged();
+        String invocationId = roles.nextInvocationId();
+        activeDispatch = implementation.begin(step, invocationId, implementation.manifest(targetCurrent));
+        activeImplementationText = null; activeImplementationOutcome = "INTERRUPTED_OR_NO_RESPONSE";
+        Map<String,Object> predecessorAcceptance = Json.object("artifactFingerprint", predecessor.fingerprint(),
+                "acceptanceInvocationId", predecessor.acceptanceInvocationId(),
+                "acceptanceProviderResponseId", predecessor.acceptanceProviderResponseId());
+        Map<String,Object> authority = Json.object("runId", roles.runId(), "stepId", step.id(),
+                "sourceAnalysisFingerprint", artifacts.required("SOURCE_ANALYSIS").fingerprint(),
+                "targetAnalysisFingerprint", artifacts.required("TARGET_ANALYSIS").fingerprint(),
+                "migrationPlanFingerprint", artifacts.required("MIGRATION_PLAN").fingerprint(),
+                "runAuthorityBundleFingerprint", bundleFingerprint, "dispatchFingerprint", activeDispatch.fingerprint(),
+                "predecessorAcceptance", predecessorAcceptance);
+        TargetContentBroker.WriteGrant grant = new TargetContentBroker.WriteGrant(roles.runId() + "-grant-" + step.id(),
+                invocationId, step.role().id, targetIdentity(), step.path(), step.action(),
+                ExecutionEvidence.path(activeDispatch.before(), step.path()), authority);
+        RoleExecutor.Invocation invocation = roles.begin(step.role(), bundleFingerprint, authorities(), activeDispatch.fingerprint());
+        if (!invocation.id().equals(invocationId)) throw new Halt("FAILED", "DISPATCH_INVOCATION_MISMATCH");
+        gates.check("BEFORE_INVOCATION", invocation, authorities(), bundleFingerprint);
+        evidence.append("IMPLEMENTATION_GRANT_ISSUED", grant.view()); mutationAuthorityIssued = true;
+        target.activate(invocationId, step.role().id, Set.of(), List.of(grant));
+        List<Map<String,Object>> receipts = new ArrayList<>();
+        String artifactRole = "IMPLEMENTATION_RESULT:" + step.id();
+        RoleExecutor.Reply reply;
+        while (true) {
+            reply = roles.turn(invocation, Json.object("task", "IMPLEMENT_ASSIGNED_STEP", "artifactRole", artifactRole,
+                    "acceptedArtifacts", artifacts.views(), "runtimeGates", gates.delivery(),
+                    "sourceScopeIdentity", sourceIdentity(), "targetScopeIdentity", targetIdentity(),
+                    "dispatch", activeDispatch.event(), "dispatchFingerprint", activeDispatch.fingerprint(),
+                    "orchestrationBinding", implementation.expectedBinding(activeDispatch),
+                    "mutationGrants", List.of(grant.view()), "predecessorAcceptance", predecessorAcceptance,
+                    "resultContract", "IMPLEMENTATION_STEP_RESULT_V1: resultVersion=1, migrationPlanFingerprint, predecessorAcceptance, grantEffects, handoff. "
+                            + "handoff is the strict trusted implementation SUCCESS contract. grantEffects exactly echo host observed grantId, invocationId, role, pathKey, action, beforeState, afterState.",
+                    "availableOperations", operations(step.role()), "toolProtocol", toolShape(), "toolResults", receipts,
+                    "observedGrantEffects", grantEffects(invocationId)), artifactRole, exact -> {
+                activeImplementationText = exact; activeImplementationOutcome = "MALFORMED_RESPONSE";
+                Map<String,Object> retained = Json.object("acceptanceStatus", "NOT_ACCEPTED", "role", step.role().id,
+                        "invocationId", invocationId, "exactText", exact,
+                        "fingerprint", Json.fingerprint(artifactRole, exact.getBytes(StandardCharsets.UTF_8)));
+                evidence.append("IMPLEMENTATION_CANDIDATE_RECEIVED", retained); nonacceptedOutputs.add(retained);
+                validateImplementationResult(Json.parse(exact), step, plan, predecessorAcceptance, invocationId);
+                activeImplementationOutcome = "REPORTED_SUCCESS";
+            });
+            checkLive(); gates.check("CONTEXT_ENTRY", invocation, authorities(), bundleFingerprint);
+            if (!reply.kind().equals("TOOL_REQUEST")) break;
+            receipts.add(executeTool(invocation, reply.toolRequest(), new HashMap<>()));
+        }
+        target.endInvocation(); unchanged();
+        gates.check("AFTER_INVOCATION", invocation, authorities(), bundleFingerprint); roles.finish(invocation);
+        ExecutionEvidence.Candidate candidate = implementation.prepareAcceptance(activeDispatch,
+                reply.artifactText().getBytes(StandardCharsets.UTF_8), implementation.manifest(targetCurrent));
+        RoleExecutor.Reply acceptance = master("ACCEPT_IMPLEMENTATION_STEP", Json.object("subjectInvocationId", invocationId,
+                "subjectRole", step.role().id, "candidateArtifactText", reply.artifactText(), "candidateFingerprint", reply.artifactFingerprint(),
+                "candidateStepRecord", candidate.event(), "hostMutationEvidence", target.mutationEvidence().stream()
+                        .filter(m -> invocationId.equals(map(m.get("grant")).get("invocationId"))).toList(), "sourceUnchanged", true));
+        unchanged();
+        artifacts.accept(artifactRole, reply.artifactText(), reply.binding(), reply.providerResponseId(),
+                (String)acceptance.binding().get("invocationId"), acceptance.providerResponseId());
+        implementation.commit(candidate);
+        nonacceptedOutputs.removeIf(value -> invocationId.equals(value.get("invocationId")));
+        phases.add(Json.object("role", step.role().id, "invocationId", invocationId, "status", "SUCCESS", "acceptanceStatus", "ACCEPTED"));
+        activeDispatch = null; activeImplementationText = null;
+    }
+
+    private void validateImplementationResult(Map<String,Object> result, ExecutionPlan.Step step, ExecutionPlan plan,
+                                               Map<String,Object> predecessor, String invocationId) {
+        ExecutionPlan.fields(result, Set.of("resultVersion", "migrationPlanFingerprint", "predecessorAcceptance", "grantEffects", "handoff"));
+        if (!Objects.equals(result.get("resultVersion"), 1)
+                || !artifacts.required("MIGRATION_PLAN").fingerprint().equals(result.get("migrationPlanFingerprint"))
+                || !predecessor.equals(result.get("predecessorAcceptance"))
+                || grantEffects(invocationId).size() != 1 || !Json.parseValue(Json.write(grantEffects(invocationId))).equals(result.get("grantEffects")))
+            throw new IllegalArgumentException("IMPLEMENTATION_RESULT_EFFECT_OR_LINEAGE_MISMATCH");
+        ImplementationHandoff.validate(step, map(result.get("handoff")), implementation.expectedBinding(activeDispatch), plan.plan());
+    }
+
+    private List<Map<String,Object>> grantEffects(String invocationId) {
+        return target.mutationEvidence().stream().filter(m -> invocationId.equals(map(m.get("grant")).get("invocationId")))
+                .map(m -> {
+                    var grant = map(m.get("grant"));
+                    return Json.object("grantId", grant.get("grantId"), "invocationId", invocationId, "role", grant.get("role"),
+                            "pathKey", grant.get("pathKey"), "action", grant.get("action"),
+                            "beforeState", m.get("beforeState"), "afterState", m.get("afterState"));
+                }).toList();
+    }
+
+    /** Project only broker-observed writes; external changes never become a new baseline. */
+    private RepositoryFiles.Snapshot expectedTarget() {
+        Map<String,Map<String,Object>> states = new TreeMap<>();
+        targetBaseline.entries().forEach(e -> states.put((String)e.get("pathKey"), e));
+        for (Map<String,Object> mutation : target.mutationEvidence()) {
+            var grant = map(mutation.get("grant")); String path = (String)grant.get("pathKey");
+            if (!Objects.equals(states.getOrDefault(path, RepositoryFiles.absent(path)), mutation.get("beforeState")))
+                throw new IllegalStateException("MUTATION_EVIDENCE_BEFORE_STATE_MISMATCH");
+            states.put(path, map(mutation.get("afterState")));
+            if (mutation.get("parentMetadataEffect") != null) {
+                var parent = map(mutation.get("parentMetadataEffect"));
+                var before = map(parent.get("beforeState")); var after = map(parent.get("afterState"));
+                String key = (String)before.get("pathKey");
+                if (!"CREATE".equals(grant.get("action")) || !RepositoryFiles.createParentTransition(path, before, after))
+                    throw new IllegalStateException("MUTATION_PARENT_EFFECT_MISMATCH");
+                if (!key.isEmpty()) {
+                    if (!before.equals(states.get(key))) throw new IllegalStateException("MUTATION_PARENT_BEFORE_STATE_MISMATCH");
+                    states.put(key, after);
+                }
+            }
+        }
+        return new RepositoryFiles.Snapshot(targetBaseline.rootFilesystemIdentity(), new ArrayList<>(states.values()),
+                targetBaseline.protectedPaths(), targetBaseline.excludedPaths());
     }
     private void blockedPreflight(String blocker) {
         phases.add(Json.object("phase", "WHOLE_PLAN_PREFLIGHT", "status", "BLOCKED", "reason", blocker));
@@ -386,26 +617,64 @@ public final class ControlledPipeline {
         throw new Halt("BLOCKED", blocker);
     }
     private void recordObservation(String stage, RepositoryFiles.Snapshot sourceState, RepositoryFiles.Snapshot targetState) {
-        evidence.append("READ_ONLY_REPOSITORY_OBSERVATION", Json.object("stage", stage,
+        evidence.append(implementation == null ? "READ_ONLY_REPOSITORY_OBSERVATION" : "IMPLEMENTATION_REPOSITORY_OBSERVATION", Json.object("stage", stage,
                 "source", snapshotView(sourceState), "target", snapshotView(targetState),
                 "limits", "POINT_IN_TIME_MODELED_STATE_ONLY"));
     }
     private void observeFinalEffects() {
         if (sourceBaseline == null || targetCurrent == null) {
-            finalEffects = Json.object("observation", "NOT_REACHED", "mutationAuthorityIssued", false); return;
+            finalEffects = Json.object("observation", "NOT_REACHED", "mutationAuthorityIssued", mutationAuthorityIssued); return;
         }
+        RepositoryFiles.Snapshot observedSource = null, observedTarget = null;
+        try { observedSource = source.observeTerminatedSnapshot(Set.of()); }
+        catch (Exception unavailable) { /* Only this observation is unknown. */ }
+        try { observedTarget = target.observeTerminatedSnapshot(Set.of()); }
+        catch (Exception unavailable) { /* Keep an independently obtained source observation. */ }
+        Boolean sourceEqual = observedSource == null ? null : sourceBaseline.equals(observedSource);
+        Boolean targetEqual = null;
+        try { targetCurrent = expectedTarget(); targetEqual = observedTarget == null ? null : targetCurrent.equals(observedTarget); }
+        catch (RuntimeException unavailable) {
+            orchestrationFailures.add(Json.object("stage", "TERMINAL_EFFECT_ACCOUNTING", "code", "EFFECT_ACCOUNTING_UNAVAILABLE"));
+        }
+        boolean unexpected = Boolean.FALSE.equals(sourceEqual) || Boolean.FALSE.equals(targetEqual);
+        boolean complete = observedSource != null && observedTarget != null;
+        finalEffects = Json.object("observation", complete ? "COMPLETE_WITHIN_MODELED_SCOPE" : "UNKNOWN",
+                "sourceObservation", observedSource == null ? "UNKNOWN" : "COMPLETE_WITHIN_MODELED_SCOPE",
+                "targetObservation", observedTarget == null ? "UNKNOWN" : "COMPLETE_WITHIN_MODELED_SCOPE",
+                "sourceUnchanged", sourceEqual, "targetUnchanged", observedTarget == null ? null : targetBaseline.equals(observedTarget),
+                "mutationAuthorityIssued", mutationAuthorityIssued,
+                "effectClassification", unexpected ? "UNEXPECTED_EFFECT" : sourceEqual == null || targetEqual == null ? "UNKNOWN" : "EXPECTED_EFFECT",
+                "targetMatchesAuthorizedEffects", targetEqual, "authorizedMutations", target.mutationEvidence(),
+                "actualSource", observedSource == null ? null : snapshotView(observedSource),
+                "actualTarget", observedTarget == null ? null : snapshotView(observedTarget), "rollback", "NOT_PERFORMED");
+        if (unexpected) terminalObservationFailure("FAILED", "UNAUTHORIZED_REPOSITORY_EFFECTS");
+        else if (!complete) terminalObservationFailure("BLOCKED", "FINAL_REPOSITORY_OBSERVATION_UNAVAILABLE");
+        else if (targetEqual == null) terminalObservationFailure("BLOCKED", "EFFECT_ACCOUNTING_UNAVAILABLE");
+        // Classification is retained before any fallible journal operation. Retention is secondary.
+        if (complete) try { recordObservation("TERMINAL", observedSource, observedTarget); }
+        catch (RuntimeException unavailable) {
+            orchestrationFailures.add(Json.object("stage", "TERMINAL_JOURNAL", "code", "TERMINAL_OBSERVATION_RETENTION_UNAVAILABLE"));
+        }
+        terminateImplementation(observedTarget);
+    }
+    private void terminalObservationFailure(String failureStatus, String failureCode) {
+        if (code.equals("NOT_STARTED") || code.equals("VALIDATION_EXECUTION_RUNTIME_REQUIRED")) {
+            status = failureStatus; code = failureCode;
+        } else if (!code.equals(failureCode)) {
+            orchestrationFailures.add(Json.object("stage", "TERMINAL_REPOSITORY_OBSERVATION", "code", failureCode));
+        }
+    }
+    private void terminateImplementation(RepositoryFiles.Snapshot observed) {
+        if (activeDispatch == null) return;
         try {
-            RepositoryFiles.Snapshot observedSource = source.observeTerminatedSnapshot(Set.of());
-            RepositoryFiles.Snapshot observedTarget = target.observeTerminatedSnapshot(Set.of());
-            recordObservation("TERMINAL", observedSource, observedTarget);
-            boolean equal = sourceBaseline.equals(observedSource) && targetCurrent.equals(observedTarget);
-            finalEffects = Json.object("observation", "COMPLETE_WITHIN_MODELED_SCOPE", "sourceUnchanged", sourceBaseline.equals(observedSource),
-                    "targetUnchanged", targetCurrent.equals(observedTarget), "mutationAuthorityIssued", false);
-            if (!equal) { status = "FAILED"; code = "UNAUTHORIZED_REPOSITORY_EFFECTS"; }
-        } catch (Exception unavailable) {
-            finalEffects = Json.object("observation", "UNKNOWN", "mutationAuthorityIssued", false);
-            if (!status.equals("FAILED")) { status = "BLOCKED"; code = "FINAL_REPOSITORY_OBSERVATION_UNAVAILABLE"; }
-        }
+            implementation.terminate(activeDispatch,
+                    activeImplementationText == null ? null : activeImplementationText.getBytes(StandardCharsets.UTF_8),
+                    observed == null ? null : implementation.manifest(observed), activeImplementationOutcome,
+                    observed == null ? "UNKNOWN" : status.equals("FAILED") ? "FAILED" : "BLOCKED", code);
+        } catch (RuntimeException unavailable) {
+            // A ledger retention failure cannot erase known filesystem effects or reopen a terminated run.
+            orchestrationFailures.add(Json.object("stage", "IMPLEMENTATION_TERMINATION", "code", "TERMINATION_EVIDENCE_UNAVAILABLE"));
+        } finally { activeDispatch = null; }
     }
     private static Map<String,Object> snapshotView(RepositoryFiles.Snapshot state) {
         return Json.object("rootFilesystemIdentity", state.rootFilesystemIdentity(), "entries", state.entries(),
@@ -439,7 +708,7 @@ public final class ControlledPipeline {
         return Json.object("operationId", "unique-current-session-id", "invocationId", "echo-current-invocation",
                 "role", "echo-current-role", "operation", "one-listed-operation", "scope", "SOURCE or TARGET",
                 "rootFilesystemIdentity", "echo-designated-scope", "path", "canonical-relative-path",
-                "query", null, "expectedBeforeFingerprint", null, "content", null);
+                "query", null, "expectedBeforeFingerprint", null, "content", null, "writeGrantField", "CREATE/MODIFY require grantId; omit for reads");
     }
     private static String safeCode(IllegalStateException failure) {
         String message = failure.getMessage();

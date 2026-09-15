@@ -214,7 +214,7 @@ final class AnalysisFixtures {
                 "analysisStatus", analysis.get("status"), "analysisFingerprint", Json.fingerprint(role, bytes)));
     }
 
-    private static Map<String, Object> decision(String id, String component, String layer, String action, String path,
+    static Map<String, Object> decision(String id, String component, String layer, String action, String path,
                                                List<String> findings, List<String> dependencies, String rationale, String responsibilityClass, String responsibility) {
         boolean create = action.equals("CREATE_NEW");
         return new LinkedHashMap<>(Json.object("id", id, "requirementIds", List.of("MR-001"), "targetComponent", component, "targetLayer", layer, "targetScope", List.of(component),
@@ -226,7 +226,7 @@ final class AnalysisFixtures {
                         "expectedPaths", create ? List.of(path) : List.of()), "confidence", "MEDIUM"));
     }
 
-    private static Map<String, Object> step(String id, int sequence, TrustedInputs.Role role, String decision, String path,
+    static Map<String, Object> step(String id, int sequence, TrustedInputs.Role role, String decision, String path,
                                           List<String> predecessors, List<String> reused) {
         return Json.object("id", id, "sequence", sequence, "specialistRole", role.id, "requirementIds", List.of("MR-001"), "componentDecisionIds", List.of(decision),
                 "objective", "Implement the exact assigned component responsibility.", "prerequisiteStepIds", predecessors, "reusedComponentDecisionIds", reused,

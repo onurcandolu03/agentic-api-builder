@@ -72,6 +72,7 @@ final class ExecutionPlan {
     }
 
     static ExecutionPlan parse(Map<String,Object> plan, List<StaticRule> suppliedRules) {
+        plan = map(Json.object("plan", plan).get("plan"));
         if (!"SUCCESS".equals(plan.get("status"))) blocked("EXECUTABLE_PLAN_REQUIRED");
         Map<String,StaticRule> rules = new HashMap<>();
         for (StaticRule rule : suppliedRules) if (rules.put(rule.reference(), rule) != null) invalid("DUPLICATE_STATIC_RULE");
@@ -245,6 +246,8 @@ final class ExecutionPlan {
                 "runtimeCapabilityIds", List.of(capabilityId), "cleanup", "PROHIBITED", "commands", List.of(),
                 "effectScopes", List.of(), "expectationRules", expected);
     }
+
+    void validateImplementationTraceability() { validateTestTraceability(map(plan.get("validationPlan"))); }
 
     private void validateTestTraceability(Map<String,Object> validation) {
         Set<String> testDecisions = new HashSet<>();

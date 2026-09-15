@@ -730,7 +730,9 @@ public final class ControlledHarness {
         var result = Json.object("format", "HOST_RUNTIME_INSPECTION_V1", "provider", VERSION,
                 "logicalContextId", contextId, "state", state.name(), "activeRole", role.id,
                 "responseId", responseId, "responseLineage", lineage,
-                "providerItemBindings", new ArrayList<>(providerItems.values()),
+                "providerItemBindings", executionMode ? providerItems.values().stream().map(item -> Json.object(
+                        "itemId", item.get("itemId"), "kind", item.get("kind"), "origin", item.get("origin"),
+                        "itemFingerprint", Json.evidenceFingerprint(item.get("item")))).toList() : new ArrayList<>(providerItems.values()),
                 "trustedSourceRegistry", trusted == null ? List.of() : trusted.registry(),
                 "trustedRegistryIdentity", trusted == null ? null : trusted.registryIdentity(),
                 "instructionAssemblyIdentity", trusted == null ? null : trusted.assemblyIdentity(),

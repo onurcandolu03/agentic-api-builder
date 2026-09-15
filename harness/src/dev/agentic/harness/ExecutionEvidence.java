@@ -34,13 +34,17 @@ final class ExecutionEvidence {
                       Map<String,Object> targetIdentity, Map<String,Object> policy, Evidence retention) {
         Json.identifier(runId);
         this.plan = plan; this.runId = runId; this.bundle = freeze(bundle); this.targetIdentity = freeze(targetIdentity);
-        this.policy = freeze(policy); this.retention = Objects.requireNonNull(retention);
+        this.policy = policy == null ? null : freeze(policy); this.retention = Objects.requireNonNull(retention);
         fields(this.targetIdentity, Set.of("declaredRoot", "resolvedRoot", "repositoryKind", "headCommit", "semanticIndexStateFingerprint"));
         if (!"NON_GIT".equals(this.targetIdentity.get("repositoryKind")) || this.targetIdentity.get("headCommit") != null
                 || this.targetIdentity.get("semanticIndexStateFingerprint") != null) blocked("NON_GIT_STATIC_PROFILE_ONLY");
+        bundleFingerprint = retain("RUN_AUTHORITY_BUNDLE_V1", this.bundle);
+        if (policy == null) {
+            policyFingerprint = null;
+            return; // Implementation-only runtime: no validation execution capability is asserted.
+        }
         if (!list(policy.get("commands")).isEmpty() || !list(policy.get("effectScopes")).isEmpty()
                 || list(policy.get("expectationRules")).isEmpty()) blocked("STATIC_VALIDATION_POLICY_REQUIRED");
-        bundleFingerprint = retain("RUN_AUTHORITY_BUNDLE_V1", this.bundle);
         policyFingerprint = retain("RUNTIME_EXECUTION_POLICY", this.policy);
         boolean bound = list(bundle.get("runtimeCapabilities")).stream().map(ExecutionPlan::map)
                 .anyMatch(c -> policyFingerprint.equals(c.get("policyFingerprint")));
@@ -119,19 +123,22 @@ final class ExecutionEvidence {
         Map<String,Object> response;
         try {
             response = strictResponse(rawResponse);
-            ImplementationHandoff.validate(dispatch.step, response, expectedBinding(dispatch), plan.plan());
+            ImplementationHandoff.validate(dispatch.step, map(response.get("handoff")), expectedBinding(dispatch), plan.plan());
         } catch (RuntimeException invalidResponse) {
             observe(dispatch.event, dispatch.fingerprint, rawResponse, "MALFORMED_RESPONSE");
             throw invalidResponse;
         }
-        String status = string(response.get("status"));
+        String status = string(map(response.get("handoff")).get("status"));
         observe(dispatch.event, dispatch.fingerprint, rawResponse, "REPORTED_" + status);
         if (!"SUCCESS".equals(status)) blocked("SPECIALIST_" + status);
         validateManifest(after);
         Step step = dispatch.step;
         List<Map<String,Object>> differences = differences(dispatch.before, after, step);
-        if (differences.size() != 1 || !authorized(differences.get(0), step)) invalid("UNAUTHORIZED_OR_ZERO_PROGRESS_MUTATION");
-        Map<String,Object> delta = differences.get(0);
+        List<Map<String,Object>> fileChanges = differences.stream().filter(d -> !createParentEffect(d, step)).toList();
+        if (fileChanges.size() != 1 || !authorized(fileChanges.getFirst(), step)) invalid("UNAUTHORIZED_OR_ZERO_PROGRESS_MUTATION");
+        for (Map<String,Object> difference : differences) if (createParentEffect(difference, step))
+            retain("IMPLEMENTATION_PARENT_METADATA_EFFECT", Json.object("dispatchFingerprint", dispatch.fingerprint, "effect", difference));
+        Map<String,Object> delta = fileChanges.getFirst();
         if (step.action().equals("MODIFY") && !Objects.equals(map(delta.get("beforeState")).get("filesystemIdentity"),
                 map(delta.get("afterState")).get("filesystemIdentity"))) invalid("MODIFY_IDENTITY_REPLACED");
         for (Obligation duty : step.obligations())
@@ -206,7 +213,7 @@ final class ExecutionEvidence {
         if (!Set.of("BLOCKED", "FAILED", "PARTIAL", "UNKNOWN").contains(disposition)) invalid("TERMINAL_DISPOSITION");
         observe(dispatch.event, dispatch.fingerprint, raw, normalizedOutcome);
         List<Map<String,Object>> changes = after == null ? List.of() : differences(dispatch.before, after, dispatch.step);
-        List<Map<String,Object>> unauthorized = changes.stream().filter(d -> !authorized(d, dispatch.step)).toList();
+        List<Map<String,Object>> unauthorized = changes.stream().filter(d -> !authorized(d, dispatch.step) && !createParentEffect(d, dispatch.step)).toList();
         String mutation = after == null ? "UNKNOWN" : changes.isEmpty() ? "NONE" : "UNACCEPTED";
         if (!unauthorized.isEmpty() || normalizedOutcome.equals("MALFORMED_RESPONSE")) disposition = "FAILED";
         String recovery = !"NONE".equals(mutation) ? "RECONCILIATION_REQUIRED"
@@ -235,6 +242,7 @@ final class ExecutionEvidence {
     }
 
     Validation beginValidation(String attemptId, Map<String,Object> before) {
+        if (policy == null) blocked("VALIDATION_EXECUTION_RUNTIME_REQUIRED");
         if (active != null || validation != null || accepted.size() != plan.steps().size()) invalid("VALIDATION_PREDECESSORS_INELIGIBLE");
         validateManifest(before);
         Set<String> depended = new HashSet<>(); plan.steps().forEach(s -> depended.addAll(s.prerequisites()));
@@ -505,6 +513,11 @@ final class ExecutionEvidence {
         return Json.object("pathKey", path, "existence", "ABSENT", "fileType", "ABSENT", "contentFingerprint", null,
                 "symlinkTargetBase64", null, "filesystemIdentity", null, "linkCount", null, "gitTracking", "NOT_APPLICABLE",
                 "indexStatus", "NOT_APPLICABLE", "worktreeStatus", "NOT_APPLICABLE", "gitRelatedPathKey", null);
+    }
+    private static boolean createParentEffect(Map<String,Object> delta, Step step) {
+        return "CREATE".equals(step.action()) && "PATH_STATE".equals(delta.get("subjectKind"))
+                && "STATE_CHANGED".equals(delta.get("transition"))
+                && RepositoryFiles.createParentTransition(step.path(), map(delta.get("beforeState")), map(delta.get("afterState")));
     }
     private boolean authorized(Map<String,Object> delta, Step step) {
         if (!"PATH_STATE".equals(delta.get("subjectKind")) || !step.path().equals(delta.get("pathKey"))

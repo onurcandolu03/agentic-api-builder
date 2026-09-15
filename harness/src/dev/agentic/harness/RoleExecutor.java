@@ -25,6 +25,10 @@ final class RoleExecutor {
     RoleExecutor(ControlledHarness harness, Evidence evidence) {
         this.harness = harness; this.evidence = evidence; this.runId = harness.executionContextId();
     }
+    String nextInvocationId() {
+        if (active != null) throw new IllegalStateException("INVOCATION_ALREADY_ACTIVE");
+        return runId + "-invocation-" + (invocationCounter + 1);
+    }
     Invocation begin(TrustedInputs.Role role, Map<String,Object> bundle,
                      List<Map<String,Object>> inputs, Map<String,Object> invocationArtifact) {
         if (active != null) throw new IllegalStateException("INVOCATION_ALREADY_ACTIVE");
@@ -110,8 +114,11 @@ final class RoleExecutor {
     }
 
     private void validateTool(Map<String,Object> tool, Invocation invocation) {
-        ExecutionPlan.fields(tool, Set.of("operationId", "invocationId", "role", "operation", "scope",
+        Set<String> fields = new HashSet<>(Set.of("operationId", "invocationId", "role", "operation", "scope",
                 "rootFilesystemIdentity", "path", "query", "expectedBeforeFingerprint", "content"));
+        boolean mutation = Set.of("CREATE_TARGET_FILE", "WRITE_TARGET_TEXT").contains(tool.get("operation"));
+        if (mutation) { fields.add("grantId"); ExecutionPlan.string(tool.get("grantId")); }
+        ExecutionPlan.fields(tool, fields);
         String operationId = ExecutionPlan.string(tool.get("operationId"));
         if (operationIds.contains(operationId)) throw new IllegalArgumentException("TOOL_REPLAY_DENIED");
         if (!invocation.id().equals(tool.get("invocationId")) || !invocation.role().id.equals(tool.get("role")))

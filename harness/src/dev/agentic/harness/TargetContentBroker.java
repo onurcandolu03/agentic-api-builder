@@ -7,11 +7,18 @@ import java.util.function.Consumer;
 
 /** Content capability complement; TargetBroker's metadata/discovery transition remains closed. */
 final class TargetContentBroker {
-    record WriteGrant(String pathKey, String action, Map<String, Object> expectedBeforeState) {
+    record WriteGrant(String grantId, String invocationId, String role, String rootIdentity,
+                      String pathKey, String action, Map<String, Object> expectedBeforeState,
+                      Map<String, Object> authority) {
         WriteGrant {
-            Objects.requireNonNull(expectedBeforeState);
-            @SuppressWarnings("unchecked") Map<String, Object> frozen = (Map<String, Object>) Json.object("state", expectedBeforeState).get("state");
-            expectedBeforeState = frozen;
+            for (String value : List.of(grantId, invocationId, role, rootIdentity)) Json.identifier(value);
+            expectedBeforeState = ExecutionPlan.map(Json.object("state", Objects.requireNonNull(expectedBeforeState)).get("state"));
+            authority = ExecutionPlan.map(Json.object("authority", Objects.requireNonNull(authority)).get("authority"));
+        }
+        Map<String,Object> view() {
+            return Json.object("grantId", grantId, "invocationId", invocationId, "role", role,
+                    "rootFilesystemIdentity", rootIdentity, "pathKey", pathKey, "action", action,
+                    "expectedBeforeState", expectedBeforeState, "authority", authority);
         }
     }
     private static final Set<String> IMPLEMENTATION_ROLES = Set.of("03-domain-contract-implementation",
@@ -25,7 +32,8 @@ final class TargetContentBroker {
     private int operations, returnedBytes;
     private Set<String> readablePaths = Set.of();
     private Map<String, WriteGrant> writes = Map.of();
-    private final Set<String> completedWrites = new HashSet<>(), invocations = new HashSet<>();
+    private final Set<String> completedWrites = new HashSet<>(), invocations = new HashSet<>(), issuedGrants = new HashSet<>();
+    private final List<Map<String,Object>> mutations = new ArrayList<>();
 
     TargetContentBroker(TargetBroker metadata, RepositoryFiles.Limits limits, Set<String> protectedPaths,
                         Set<String> excludedPaths, Consumer<String> credentialCheck) throws IOException {
@@ -69,6 +77,9 @@ final class TargetContentBroker {
             Map<String, WriteGrant> grants = new HashMap<>();
             for (WriteGrant grant : writes) {
                 RepositoryFiles.canonicalPath(grant.pathKey());
+                if (!invocationId.equals(grant.invocationId()) || !role.equals(grant.role())
+                        || !metadata.metadata().rootFilesystemIdentity().equals(grant.rootIdentity())
+                        || !issuedGrants.add(grant.grantId())) throw new IOException("TARGET_GRANT_BINDING_OR_REPLAY");
                 if (files.prohibited(grant.pathKey()) || !Set.of("CREATE", "MODIFY").contains(grant.action())
                         || !grant.pathKey().equals(grant.expectedBeforeState().get("pathKey"))
                         || grants.put(grant.pathKey(), grant) != null)
@@ -89,12 +100,12 @@ final class TargetContentBroker {
     }
 
     Map<String, Object> execute(String invocationId, String role, String operation, String path, String query,
-                                Map<String, Object> expectedBeforeFingerprint, String content) throws IOException {
+                                Map<String, Object> expectedBeforeFingerprint, String content, String grantId) throws IOException {
         try {
             idle(); current(invocationId, role); busy = true;
             if (++operations > limits.maxOperations()) throw new IOException("TARGET_OPERATION_LIMIT");
             boolean mutation = operation.equals("WRITE_TARGET_TEXT") || operation.equals("CREATE_TARGET_FILE");
-            if (mutation ? query != null : content != null || expectedBeforeFingerprint != null
+            if (mutation ? query != null : grantId != null || content != null || expectedBeforeFingerprint != null
                     || query != null && !operation.equals("SEARCH_TARGET_TEXT") && !operation.equals("SEARCH_TEXT"))
                 throw new IOException("TARGET_UNUSED_TOOL_ARGUMENT");
             Object result;
@@ -102,8 +113,25 @@ final class TargetContentBroker {
                 WriteGrant grant = writes.get(path);
                 String action = operation.equals("CREATE_TARGET_FILE") ? "CREATE" : "MODIFY";
                 if (!IMPLEMENTATION_ROLES.contains(role) || grant == null || !grant.action().equals(action)
-                        || !completedWrites.add(path)) throw new IOException("TARGET_WRITE_DENIED");
+                        || !Objects.equals(grantId, grant.grantId())
+                        || !invocationId.equals(grant.invocationId()) || !role.equals(grant.role())
+                        || !metadata.metadata().rootFilesystemIdentity().equals(grant.rootIdentity())
+                        || !completedWrites.add(grantId)) throw new IOException("TARGET_WRITE_DENIED");
+                String parent = RepositoryFiles.parentKey(path);
+                Map<String,Object> parentBefore = files.state(parent, false);
                 result = files.write(path, action, grant.expectedBeforeState(), expectedBeforeFingerprint, content);
+                // Retain effects before any result-delivery failure can close this broker.
+                mutations.add(Json.object("grant", grant.view(), "beforeState", grant.expectedBeforeState(),
+                        "afterState", result, "exactAfterText", content));
+                Map<String,Object> parentAfter = files.state(parent, false);
+                if (!parentBefore.equals(parentAfter)) {
+                    if (!action.equals("CREATE") || !RepositoryFiles.createParentTransition(path, parentBefore, parentAfter))
+                        throw new IOException("TARGET_PARENT_EFFECT_REJECTED");
+                    // This is an observed consequence of the CREATE, never directory mutation authority.
+                    Map<String,Object> retained = new LinkedHashMap<>(mutations.getLast());
+                    retained.put("parentMetadataEffect", Json.object("beforeState", parentBefore, "afterState", parentAfter));
+                    mutations.set(mutations.size() - 1, ExecutionPlan.map(Json.object("mutation", retained).get("mutation")));
+                }
             } else {
                 if (!(role.equals("01-target-analysis") || role.equals("MASTER")) && !readablePaths.contains(path))
                     throw new IOException("TARGET_READ_PATH_DENIED");
@@ -153,6 +181,7 @@ final class TargetContentBroker {
         } catch (IOException | RuntimeException rejected) { throw new IOException("TARGET_TERMINAL_OBSERVATION_UNAVAILABLE"); }
         finally { busy = false; }
     }
+    List<Map<String,Object>> mutationEvidence() { return List.copyOf(mutations); }
     void endInvocation() throws IOException {
         try { idle(); requireAuthorized(); invocationId = null; activeRole = null; readablePaths = Set.of(); writes = Map.of(); completedWrites.clear(); }
         catch (IOException | RuntimeException rejected) { close(); throw new IOException("TARGET_CONTENT_REJECTED"); }

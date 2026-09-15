@@ -306,5 +306,21 @@ final class RepositoryFiles {
         return after;
     }
 
+    static String parentKey(String path) {
+        int slash = path.lastIndexOf('/');
+        return slash < 0 ? "" : path.substring(0, slash);
+    }
+
+    /** Some POSIX filesystems count directory entries as links. Only the immediate
+     * CREATE parent may gain one link; every other state field must be identical. */
+    static boolean createParentTransition(String file, Map<String,Object> before, Map<String,Object> after) {
+        if (!parentKey(file).equals(before.get("pathKey")) || !"DIRECTORY".equals(before.get("fileType"))
+                || !(before.get("linkCount") instanceof Number left) || !(after.get("linkCount") instanceof Number right)
+                || right.longValue() != left.longValue() + 1) return false;
+        Map<String,Object> expected = new LinkedHashMap<>(before);
+        expected.put("linkCount", after.get("linkCount"));
+        return expected.equals(after);
+    }
+
     String canonicalScope(String path) { return path.isEmpty() ? root.toString() : root.resolve(path).toString(); }
 }

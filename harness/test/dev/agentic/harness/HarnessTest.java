@@ -29,8 +29,7 @@ public final class HarnessTest {
     public static void main(String[] args) throws Exception {
         if (args.length != 1) throw new IllegalArgumentException("TEMP_TEST_DIRECTORY_REQUIRED");
         testRoot = Path.of(args[0]).toRealPath();
-        Path allowedParent = (Files.isDirectory(Path.of("/private/tmp")) ? Path.of("/private/tmp")
-                : Path.of("/tmp")).toRealPath();
+        Path allowedParent = Path.of(System.getProperty("java.io.tmpdir")).toRealPath();
         check(testRoot.getParent().equals(allowedParent), "fixture directory must be directly under canonical temp");
 
         run("canonical JSON and deterministic fingerprints", HarnessTest::canonicalJson);

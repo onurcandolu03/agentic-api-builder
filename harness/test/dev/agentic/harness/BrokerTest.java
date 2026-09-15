@@ -20,7 +20,7 @@ public final class BrokerTest {
     public static void main(String[] args) throws Exception {
         if (args.length != 1) throw new IllegalArgumentException("TEMP_TEST_DIRECTORY_REQUIRED");
         testRoot = Path.of(args[0]).toRealPath();
-        Path allowed = (Files.isDirectory(Path.of("/private/tmp")) ? Path.of("/private/tmp") : Path.of("/tmp")).toRealPath();
+        Path allowed = Path.of(System.getProperty("java.io.tmpdir")).toRealPath();
         check(testRoot.getParent().equals(allowed), "isolated temporary fixtures");
         run("source content requires both host gates", BrokerTest::sourceGate);
         run("source read list search remain untrusted data", BrokerTest::sourceReads);
@@ -37,6 +37,8 @@ public final class BrokerTest {
         run("expected before fingerprint and identity are enforced", BrokerTest::beforeState);
         run("target traversal symlink and hardlink writes rejected", BrokerTest::targetEscapes);
         run("write replay and stale invocations are rejected", BrokerTest::targetReplay);
+        run("issued grants reject rebinding and cross-invocation replay", BrokerTest::grantBindings);
+        run("CREATE parent metadata has an exact bounded transition", BrokerTest::parentEffects);
         run("protected paths cannot be traversed or mutated", BrokerTest::protectedPaths);
         run("case aliases and unsupported Unicode names are rejected", BrokerTest::collisions);
         run("non-Git snapshots include created modified and absent states", BrokerTest::snapshots);
@@ -89,13 +91,13 @@ public final class BrokerTest {
         return broker.execute("source-1", SOURCE, "READ_SOURCE_TEXT", path, null);
     }
     private static Map<String, Object> targetRead(TargetContentBroker broker, String invocation, String role, String path) throws IOException {
-        return broker.execute(invocation, role, "READ_TARGET_TEXT", path, null, null, null);
+        return broker.execute(invocation, role, "READ_TARGET_TEXT", path, null, null, null, null);
     }
     private static Map<String, Object> state(TargetContentBroker broker, String path) throws IOException {
         return broker.hostSnapshot(Set.of(path)).entries().stream().filter(e -> e.get("pathKey").equals(path)).findFirst().orElseThrow();
     }
     private static void grant(TargetContentBroker broker, String invocation, String role, String path, String action) throws IOException {
-        broker.activate(invocation, role, Set.of(), List.of(new TargetContentBroker.WriteGrant(path, action, state(broker, path))));
+        broker.activate(invocation, role, Set.of(), List.of(new TargetContentBroker.WriteGrant("grant-" + invocation, invocation, role, broker.hostSnapshot(Set.of()).rootFilesystemIdentity(), path, action, state(broker, path), Json.object("fixture", "host-issued"))));
     }
     @SuppressWarnings("unchecked") private static Map<String, Object> map(Object value) { return (Map<String, Object>) value; }
     private static void sourceGate() throws Exception {
@@ -151,7 +153,7 @@ public final class BrokerTest {
     private static void analysisReadonly() throws Exception {
         Fixture fixture = new Fixture(); TargetContentBroker broker = fixture.target(true); broker.activate("target-1", TARGET, Set.of(), List.of());
         check(targetRead(broker, "target-1", TARGET, "Existing.java").get("dataClassification").equals("UNTRUSTED_DATA"), "target read");
-        denied(() -> broker.execute("target-1", TARGET, "WRITE_TARGET_TEXT", "Existing.java", null, null, "changed"));
+        denied(() -> broker.execute("target-1", TARGET, "WRITE_TARGET_TEXT", "Existing.java", null, null, "changed", "grant-" + "target-1"));
         check(Files.readString(fixture.target.resolve("Existing.java")).equals("class Existing {}\n"), "analysis cannot write");
     }
     private static void planningDenied() throws Exception {
@@ -162,30 +164,30 @@ public final class BrokerTest {
         Fixture fixture = new Fixture(); TargetContentBroker broker = fixture.target(true);
         Map<String, Object> before = state(broker, "Existing.java");
         grant(broker, "modify-1", DOMAIN, "Existing.java", "MODIFY");
-        broker.execute("modify-1", DOMAIN, "WRITE_TARGET_TEXT", "Existing.java", null, map(before.get("contentFingerprint")), "class Existing { int value; }\n");
+        broker.execute("modify-1", DOMAIN, "WRITE_TARGET_TEXT", "Existing.java", null, map(before.get("contentFingerprint")), "class Existing { int value; }\n", "grant-" + "modify-1");
         check(Files.readString(fixture.target.resolve("Existing.java")).contains("int value"), "authorized modify");
         broker.endInvocation(); grant(broker, "create-1", DOMAIN, "src/New.java", "CREATE");
-        broker.execute("create-1", DOMAIN, "CREATE_TARGET_FILE", "src/New.java", null, null, "class New {}\n");
+        broker.execute("create-1", DOMAIN, "CREATE_TARGET_FILE", "src/New.java", null, null, "class New {}\n", "grant-" + "create-1");
         check(Files.readString(fixture.target.resolve("src/New.java")).equals("class New {}\n"), "authorized create");
     }
     private static void unauthorizedWrites() throws Exception {
         Fixture fixture = new Fixture(); TargetContentBroker broker = fixture.target(true); grant(broker, "impl-1", DOMAIN, "src/New.java", "CREATE");
-        denied(() -> broker.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "src/Unowned.java", null, null, "unowned"));
+        denied(() -> broker.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "src/Unowned.java", null, null, "unowned", "grant-" + "impl-1"));
         check(!Files.exists(fixture.target.resolve("src/Unowned.java")), "unowned path absent");
         TargetContentBroker noPlan = new Fixture().target(true); noPlan.activate("impl-1", DOMAIN, Set.of(), List.of());
-        denied(() -> noPlan.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "src/New.java", null, null, "no plan"));
+        denied(() -> noPlan.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "src/New.java", null, null, "no plan", "grant-" + "impl-1"));
     }
     private static void readScope() throws Exception {
         TargetContentBroker broker = new Fixture().target(true); broker.activate("impl-1", DOMAIN, Set.of("Existing.java"), List.of());
         targetRead(broker, "impl-1", DOMAIN, "Existing.java");
-        denied(() -> broker.execute("impl-1", DOMAIN, "LIST_TARGET_PATHS", "", null, null, null));
+        denied(() -> broker.execute("impl-1", DOMAIN, "LIST_TARGET_PATHS", "", null, null, null, null));
     }
     private static void beforeState() throws Exception {
         Fixture fixture = new Fixture(); TargetContentBroker broker = fixture.target(true); grant(broker, "impl-1", DOMAIN, "Existing.java", "MODIFY");
-        denied(() -> broker.execute("impl-1", DOMAIN, "WRITE_TARGET_TEXT", "Existing.java", null, GATE, "changed"));
+        denied(() -> broker.execute("impl-1", DOMAIN, "WRITE_TARGET_TEXT", "Existing.java", null, GATE, "changed", "grant-" + "impl-1"));
         Fixture drift = new Fixture(); TargetContentBroker next = drift.target(true); Map<String, Object> before = state(next, "Existing.java");
         grant(next, "impl-1", DOMAIN, "Existing.java", "MODIFY"); Files.writeString(drift.target.resolve("Existing.java"), "external change");
-        denied(() -> next.execute("impl-1", DOMAIN, "WRITE_TARGET_TEXT", "Existing.java", null, map(before.get("contentFingerprint")), "changed"));
+        denied(() -> next.execute("impl-1", DOMAIN, "WRITE_TARGET_TEXT", "Existing.java", null, map(before.get("contentFingerprint")), "changed", "grant-" + "impl-1"));
         check(Files.readString(drift.target.resolve("Existing.java")).equals("external change"), "drift never adopted");
     }
     private static void targetEscapes() throws Exception {
@@ -199,10 +201,53 @@ public final class BrokerTest {
     }
     private static void targetReplay() throws Exception {
         TargetContentBroker broker = new Fixture().target(true); grant(broker, "impl-1", DOMAIN, "src/New.java", "CREATE");
-        broker.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "src/New.java", null, null, "class New {}\n");
-        denied(() -> broker.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "src/New.java", null, null, "class New {}\n"));
+        broker.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "src/New.java", null, null, "class New {}\n", "grant-" + "impl-1");
+        denied(() -> broker.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "src/New.java", null, null, "class New {}\n", "grant-" + "impl-1"));
         TargetContentBroker stale = new Fixture().target(true); stale.activate("target-1", TARGET, Set.of(), List.of()); stale.endInvocation(); stale.activate("target-2", TARGET, Set.of(), List.of());
         denied(() -> targetRead(stale, "target-1", TARGET, "Existing.java"));
+    }
+    private static void grantBindings() throws Exception {
+        for (String field : List.of("role", "invocation", "root", "replay", "planner", "analysis")) {
+            TargetContentBroker broker = new Fixture().target(true);
+            String root = broker.hostSnapshot(Set.of()).rootFilesystemIdentity();
+            var grant = new TargetContentBroker.WriteGrant("one-grant", "impl-1", DOMAIN, root,
+                    "src/New.java", "CREATE", state(broker, "src/New.java"), Json.object("fixture", "host-issued"));
+            if (field.equals("replay")) {
+                broker.activate("impl-1", DOMAIN, Set.of(), List.of(grant)); broker.endInvocation();
+                var rebound = new TargetContentBroker.WriteGrant("one-grant", "impl-2", DOMAIN, root,
+                        "src/New.java", "CREATE", grant.expectedBeforeState(), grant.authority());
+                denied(() -> broker.activate("impl-2", DOMAIN, Set.of(), List.of(rebound)));
+            } else if (field.equals("root")) {
+                var wrong = new TargetContentBroker.WriteGrant("one-grant", "impl-1", DOMAIN, "POSIX:0:0",
+                        "src/New.java", "CREATE", grant.expectedBeforeState(), grant.authority());
+                denied(() -> broker.activate("impl-1", DOMAIN, Set.of(), List.of(wrong)));
+            } else {
+                String role = switch (field) {
+                    case "role" -> "04-persistence-mapping-implementation";
+                    case "planner" -> "02-migration-planning";
+                    case "analysis" -> TARGET;
+                    default -> DOMAIN;
+                };
+                denied(() -> broker.activate(field.equals("invocation") ? "impl-2" : "impl-1", role, Set.of(), List.of(grant)));
+            }
+        }
+    }
+    private static void parentEffects() throws Exception {
+        Fixture fixture = new Fixture(); TargetContentBroker broker = fixture.target(true);
+        var before = state(broker, "src"); grant(broker, "impl-1", DOMAIN, "src/New.java", "CREATE");
+        broker.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "src/New.java", null, null, "class New {}\n", "grant-impl-1");
+        var after = state(broker, "src");
+        if (!before.equals(after)) {
+            check(RepositoryFiles.createParentTransition("src/New.java", before, after), "only the immediate parent's link count increased once");
+            check(broker.mutationEvidence().getFirst().containsKey("parentMetadataEffect"), "parent effect retained with actual file write");
+        }
+        Map<String,Object> changed = new LinkedHashMap<>(before);
+        changed.put("linkCount", ((Number)before.get("linkCount")).longValue() + 2);
+        check(!RepositoryFiles.createParentTransition("src/New.java", before, changed), "extra link change rejected");
+        changed.put("linkCount", ((Number)before.get("linkCount")).longValue() + 1);
+        changed.put("filesystemIdentity", "POSIX:0:0");
+        check(!RepositoryFiles.createParentTransition("src/New.java", before, changed), "parent replacement rejected");
+        check(!RepositoryFiles.createParentTransition("other/New.java", before, after), "unrelated directory never authorized");
     }
     private static void protectedPaths() throws Exception {
         Fixture fixture = new Fixture(); Files.createDirectory(fixture.source.resolve("protected")); Files.writeString(fixture.source.resolve("protected/secret.txt"), "password=secret-value");
@@ -222,7 +267,7 @@ public final class BrokerTest {
     private static void snapshots() throws Exception {
         TargetContentBroker broker = new Fixture().target(true); var before = broker.hostSnapshot(Set.of("New.java"));
         check(before.entries().stream().anyMatch(e -> e.get("pathKey").equals("New.java") && e.get("existence").equals("ABSENT")), "absence proof");
-        grant(broker, "impl-1", DOMAIN, "New.java", "CREATE"); broker.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "New.java", null, null, "class New {}\n");
+        grant(broker, "impl-1", DOMAIN, "New.java", "CREATE"); broker.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "New.java", null, null, "class New {}\n", "grant-" + "impl-1");
         var after = broker.hostSnapshot(Set.of("New.java"));
         long differences = before.entries().stream().filter(e -> !after.entries().contains(e)).count();
         check(differences == 1, "full canonical before and after changed only planned path");
@@ -270,19 +315,19 @@ public final class BrokerTest {
             String query = argument == 0 ? "unexpected query" : null;
             Map<String, Object> before = argument == 1 ? GATE : null;
             String content = argument == 2 ? "unexpected content" : null;
-            denied(() -> target.execute("target-1", TARGET, "READ_TARGET_TEXT", "Existing.java", query, before, content));
+            denied(() -> target.execute("target-1", TARGET, "READ_TARGET_TEXT", "Existing.java", query, before, content, null));
             check(Files.readString(fixture.target.resolve("Existing.java")).equals("class Existing {}\n"), "unused argument caused no mutation");
         }
         Fixture fixture = new Fixture(); TargetContentBroker target = fixture.target(true);
         grant(target, "impl-1", DOMAIN, "src/New.java", "CREATE");
-        denied(() -> target.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "src/New.java", "unused query", null, "class New {}\n"));
+        denied(() -> target.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "src/New.java", "unused query", null, "class New {}\n", "grant-" + "impl-1"));
         check(!Files.exists(fixture.target.resolve("src/New.java")), "invalid write arguments rejected before mutation");
     }
     private static void secrets() throws Exception {
         Fixture fixture = new Fixture(); Files.writeString(fixture.source.resolve("Entry.java"), "password=secret-value");
         SourceBroker source = fixture.source(true); source.activate("source-1", SOURCE); denied(() -> sourceRead(source, "Entry.java"));
         Fixture targetFixture = new Fixture(); TargetContentBroker target = targetFixture.target(true); grant(target, "impl-1", DOMAIN, "src/New.java", "CREATE");
-        denied(() -> target.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "src/New.java", null, null, "password=secret-value"));
+        denied(() -> target.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "src/New.java", null, null, "password=secret-value", "grant-" + "impl-1"));
         check(!Files.exists(targetFixture.target.resolve("src/New.java")), "secret rejection precedes write");
     }
     private static void reentrancy() throws Exception {
@@ -292,18 +337,18 @@ public final class BrokerTest {
         Fixture targetFixture = new Fixture(); TargetContentBroker[] target = new TargetContentBroker[1];
         target[0] = targetFixture.target(true, Set.of(), value -> { if (value.equals("close-during-write")) target[0].close(); });
         grant(target[0], "impl-1", DOMAIN, "src/New.java", "CREATE");
-        denied(() -> target[0].execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "src/New.java", null, null, "close-during-write"));
+        denied(() -> target[0].execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "src/New.java", null, null, "close-during-write", "grant-" + "impl-1"));
         check(!Files.exists(targetFixture.target.resolve("src/New.java")), "callback close prevents mutation");
     }
     private static void validation() throws Exception {
         TargetContentBroker broker = new Fixture().target(true); broker.activate("validation-1", "07-validation", Set.of("Existing.java"), List.of());
         targetRead(broker, "validation-1", "07-validation", "Existing.java");
-        denied(() -> broker.execute("validation-1", "07-validation", "RUN_COMMAND", "Existing.java", null, null, null));
+        denied(() -> broker.execute("validation-1", "07-validation", "RUN_COMMAND", "Existing.java", null, null, null, null));
     }
     private static void terminalObservation() throws Exception {
         Fixture fixture = new Fixture(); TargetContentBroker target = fixture.target(true); grant(target, "impl-1", DOMAIN, "New.java", "CREATE");
-        target.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "New.java", null, null, "class New {}\n");
-        denied(() -> target.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "Unowned.java", null, null, "unowned"));
+        target.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "New.java", null, null, "class New {}\n", "grant-" + "impl-1");
+        denied(() -> target.execute("impl-1", DOMAIN, "CREATE_TARGET_FILE", "Unowned.java", null, null, "unowned", "grant-" + "impl-1"));
         check(target.observeTerminatedSnapshot(Set.of("New.java")).entries().stream()
                 .anyMatch(e -> e.get("pathKey").equals("New.java") && e.get("existence").equals("PRESENT")), "persistent prior effects observed");
         denied(() -> target.activate("new-invocation", TARGET, Set.of(), List.of()));
