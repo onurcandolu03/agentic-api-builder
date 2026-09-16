@@ -1,101 +1,64 @@
 # Agentic API Builder
 
-An experimental, agent-driven workflow for transforming existing Java and Spring Boot API codebases according to structured source and target rules.
-
-## Overview
-
-Agentic API Builder explores a deterministic pipeline for analyzing, migrating, and validating existing Java and Spring Boot APIs. Its intended purpose is to transform an existing codebase toward a defined target structure or API contract while preserving required behavior and controlling change scope.
-
-The project currently represents requirements with structured JSON API specifications and controls agent behavior with Markdown-based instructions. It is a research and development project and does not claim production readiness.
-
-## Current State
-
-The current implementation uses one agent specification: `agents/api-generator.md`. That file contains the complete workflow in a single Version 3 specification, including input validation, project analysis, planning, implementation, test generation, test execution, build validation, and final reporting.
-
-Current experiments validate foundational concepts that will support the broader migration pipeline:
-
-- evidence-based project analysis;
-- `REUSE_EXISTING`, `EXTEND_EXISTING`, `CREATE_NEW`, and `MANUAL_REVIEW_REQUIRED` decisions;
-- implementation planning before code changes;
-- explicit planned file scope and post-change scope verification;
-- structured business rules and acceptance-criteria traceability;
-- implementation and regression testing; and
-- mandatory test and build validation before success can be reported.
-
-The included customer APIs are experimental examples rather than the project's primary product. They currently demonstrate customer creation, lookup and deletion, request validation, case-insensitive email uniqueness, regression protection, and appropriate HTTP status handling. A simple `/hello` endpoint is also retained.
-
-The repository does not yet implement a multi-agent orchestrator or separate specialist agents.
-
-## Current Workflow
-
-1. Define an operation in `input/api-spec.json`.
-2. Validate the structured input using `agents/api-generator.md`.
-3. Analyze the existing project and collect evidence.
-4. Produce an implementation plan and record the allowed file scope.
-5. Implement only planned changes and add traceable tests.
-6. Run tests followed by a clean package build.
-7. Compare actual changes with the plan and produce a structured report.
-
-## Target Architecture
-
-The intended architecture is a staged, multi-agent migration and transformation pipeline coordinated by a master orchestrator:
+A controlled, agent-driven pipeline for analyzing and migrating existing Java
+and Spring Boot APIs. The host runtime enforces access boundaries, retains
+evidence, and requires MASTER acceptance between stages.
 
 ```text
-MASTER.md
-    |
-    +-- source-analysis agent
-    +-- target-analysis agent
-    +-- migration-planning agent
-    +-- implementation agent(s)
-    +-- test/validation agent
-    +-- final structured report
+MASTER
+  → 00 source analysis
+  → 01 target analysis
+  → 02 migration planning
+  → 03 domain/contracts
+  → 04 persistence/mapping
+  → 05 service/API
+  → 06 tests
+  → 07 validation
+  → MASTER final result
 ```
 
-`MASTER.md` is planned to orchestrate the workflow. It will coordinate specialized agents, enforce execution order, pass structured outputs between stages, and stop or block processing when required information, evidence, or validation is missing.
+The controlled runtime and its security boundaries are authoritative. Source
+access is read-only; target writes require exact accepted-plan grants. Validation
+requires a separate host-supplied trusted profile. The current profile supports
+a fixed Java contract-test fixture, not arbitrary project builds.
 
-As the workflow matures, responsibilities will be separated so that source analysis describes the existing system, target analysis interprets the desired architecture and contracts, migration planning maps the transition, implementation agents perform bounded changes, and test/validation verifies the result. Specialized stages may exchange structured JSON inputs and outputs to make decisions traceable and machine-verifiable.
+## Repository
 
-This target architecture is planned work; `MASTER.md` and the specialized agent pipeline are not currently implemented.
+- [MASTER.md](MASTER.md): orchestration and acceptance rules.
+- [agents/](agents/): specialist specifications 00–07.
+- [Orchestration contract](agents/contracts/orchestration-contract.md): shared
+  authority, evidence, and handoff contracts.
+- [harness/](harness/): controlled Java runtime, offline tests, and fixtures.
+- [Harness documentation](harness/README.md): host entry points, dependency
+  setup, security boundaries, supported profiles, and limitations.
 
-## Tech Stack
+## Offline validation
 
-- Java 21
-- Spring Boot 4.1.1
-- Spring Web MVC
-- Jakarta Bean Validation
-- Maven Wrapper
-- JUnit and Spring MockMvc
+Use JDK 21 (`java` and `javac` on PATH), Bash, and a supported POSIX filesystem.
+The canonical suite requires these existing local jars:
 
-## Project Structure
+- `tools.jackson.core:jackson-core:3.1.5`
+- `tools.jackson.core:jackson-databind:3.1.5`
+- `com.fasterxml.jackson.core:jackson-annotations:2.21`
 
-```text
-agents/api-generator.md   Current single-agent workflow specification
-input/api-spec.json       Current structured API operation input
-src/main/java/            Spring Boot application and API implementation
-src/test/java/            Application and endpoint tests
-pom.xml                   Maven project configuration
-```
-
-## Validation Criteria
-
-Under the current single-agent specification, a change can report success only when:
-
-- all required phases complete successfully;
-- every mandatory acceptance criterion is directly verified;
-- `./mvnw test` passes;
-- `./mvnw clean package` passes;
-- actual changes remain within the planned file scope; and
-- no blocking question or manual-review decision remains.
-
-Run the validation commands from the repository root:
+The test script looks in the corresponding paths under `~/.m2/repository` by
+default. If the jars are stored elsewhere, set `HARNESS_JACKSON_CLASSPATH` to their
+colon-separated paths. Supply these dependencies before running the suite; the
+script fails if they are missing and never downloads dependencies.
 
 ```bash
-./mvnw test
-./mvnw clean package
+bash harness/test.sh
 ```
 
-## Experimental Status
+The suite compiles the harness in a temporary directory and runs 460 checks:
+70 harness, 12 source contract, 145 artifact contract, 29 broker, 95 execution
+runtime, 56 implementation runtime, and 53 validation runtime. Provider responses
+are mocked; validation executes only the fixed local JDK worker with approved
+temporary fixture sources. No API key is required.
 
-This repository is experimental. The completed customer API exercises test the controls in the current single-agent specification, including component creation, safe extension, business-rule enforcement, regression protection, and detection of already-satisfied requirements.
+## Current limits
 
-The larger source-to-target migration pipeline, `MASTER.md` orchestrator, specialized agents, and inter-stage JSON contracts remain planned work. The current implementation should be treated as a validation foundation for that direction, not as a finished migration platform or production-ready system.
+The offline suite exercises the controlled 00–07 route. Live provider E2E remains
+unproven, and there is no live CLI. General project validation, YAML input,
+execution-profile Git-state support, durable recovery, and resume remain outside
+the supported runtime. This is not a production-readiness claim.

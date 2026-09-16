@@ -318,9 +318,11 @@ hard-link creation after inspection, or filesystem races.
 ## API boundary and evidence
 
 The ordinary supported REST Responses API is used through Java's `HttpClient`.
-No new SDK is installed. JSON uses the Jackson 3.1.5 jars already established by
-the repository's Spring Boot dependency setup; `pom.xml` is unchanged. The test
-script needs those already cached jars and never resolves/downloads dependencies.
+No new SDK is installed. JSON uses locally supplied Jackson core/databind 3.1.5
+and Jackson annotations 2.21 jars. The test script reads their standard paths under
+`~/.m2/repository`, or the colon-separated `HARNESS_JACKSON_CLASSPATH` override.
+See [dependency setup](../README.md#offline-validation). It never
+resolves/downloads dependencies or requires a repository application build.
 
 Official documentation consulted for this implementation:
 
@@ -405,8 +407,8 @@ caller data is representable. They also scan the complete current `MASTER.md`
 and freeze the actual ten-document trusted chain through the public host path,
 with transport methods that fail if called. They do not execute source discovery
 or planning themselves; the runtime groups execute the mocked controlled route.
-The script does not invoke Maven/Gradle, run this repository’s application tests,
-or call the network. Its validation group compiles and executes only host-approved
+The script does not invoke Maven/Gradle or call the network.
+Its validation group compiles and executes only host-approved
 temporary fixture code through the fixed profile. Fixtures
 are created beneath the canonical `${TMPDIR:-/tmp}` directory,
 outside any real target. No API key is required or read by these tests.
