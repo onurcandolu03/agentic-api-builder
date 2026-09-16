@@ -114,6 +114,15 @@ final class RoleExecutor {
     }
 
     private void validateTool(Map<String,Object> tool, Invocation invocation) {
+        if ("RUN_VALIDATION".equals(tool.get("operation"))) {
+            ExecutionPlan.fields(tool, Set.of("operationId", "operation", "invocationId", "role", "authorityId"));
+            if (invocation.role() != TrustedInputs.Role.VALIDATION || !invocation.id().equals(tool.get("invocationId"))
+                    || !invocation.role().id.equals(tool.get("role"))) throw new IllegalArgumentException("VALIDATION_INVOCATION_MISMATCH");
+            ExecutionPlan.string(tool.get("authorityId"));
+            String id = ExecutionPlan.string(tool.get("operationId"));
+            if (operationIds.contains(id)) throw new IllegalArgumentException("TOOL_REPLAY_DENIED");
+            return;
+        }
         Set<String> fields = new HashSet<>(Set.of("operationId", "invocationId", "role", "operation", "scope",
                 "rootFilesystemIdentity", "path", "query", "expectedBeforeFingerprint", "content"));
         boolean mutation = Set.of("CREATE_TARGET_FILE", "WRITE_TARGET_TEXT").contains(tool.get("operation"));

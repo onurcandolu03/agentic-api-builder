@@ -28,6 +28,7 @@ final class RepositoryFiles {
         Snapshot { entries = List.copyOf(entries); protectedPaths = List.copyOf(protectedPaths); excludedPaths = List.copyOf(excludedPaths); }
     }
     private record Observed(Path path, Map<String, Object> attributes) {}
+    private boolean validationOutputs;
     private final Path root;
     private final String rootIdentity;
     private final List<Observed> rootChain;
@@ -83,7 +84,8 @@ final class RepositoryFiles {
     private void allowed(String path) throws IOException {
         canonicalPath(path);
         if (prohibited(path)) throw new IOException("PROTECTED_AREA_ACCESS_REQUIRED");
-        if (path.toLowerCase(Locale.ROOT).equals(".git") || path.toLowerCase(Locale.ROOT).startsWith(".git/"))
+        if ((validationOutputs && Arrays.asList(path.toLowerCase(Locale.ROOT).split("/")).contains(".git"))
+                || path.toLowerCase(Locale.ROOT).equals(".git") || path.toLowerCase(Locale.ROOT).startsWith(".git/"))
             throw new IOException("GIT_CONTENT_OBSERVATION_UNSUPPORTED");
     }
 
@@ -143,7 +145,7 @@ final class RepositoryFiles {
         }
         if (bytes.length > limits.maxFileBytes()) throw new IOException("REPOSITORY_FILE_LIMIT");
         recheck(entries); verify();
-        safe(text(bytes));
+        if (!(validationOutputs && ValidationProfile.ephemeral(path))) safe(text(bytes));
         recheck(entries); verify();
         return bytes;
     }
@@ -233,6 +235,21 @@ final class RepositoryFiles {
         }
         return Json.object("hits", hits, "complete", true, "truncated", false);
     }
+
+    Map<String,Object> validationModes(Snapshot snapshot) throws IOException {
+        verify();
+        Map<String,Object> modes = new TreeMap<>();
+        for (var entry : snapshot.entries()) {
+            String path = (String)entry.get("pathKey");
+            if (!(validationOutputs && ValidationProfile.ephemeral(path))) {
+                var checked = chain(path, false);
+                modes.put(path, checked.getLast().attributes().get("mode"));
+            }
+        }
+        verify(); return Json.object("modes", modes);
+    }
+
+    RepositoryFiles validationOutputs() { validationOutputs = true; return this; }
 
     Snapshot snapshot(Set<String> additionalPaths) throws IOException {
         verify(); TreeMap<String, Map<String, Object>> entries = new TreeMap<>();

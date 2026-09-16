@@ -7,7 +7,9 @@ MASTER registration and gate acceptance → 00 → MASTER acceptance → 01 → 
 acceptance → 02 → MASTER acceptance → implementation preflight and MASTER acceptance
 → 03 domain/contracts → MASTER step acceptance → 04 persistence/mapping → MASTER
 step acceptance → 05 service/API → MASTER step acceptance → 06 tests → MASTER step
-acceptance → `BLOCKED: VALIDATION_EXECUTION_RUNTIME_REQUIRED`.
+acceptance → 07 controlled validation → MASTER validation acceptance → `SUCCESS`,
+`FAILED`, or `BLOCKED` based on host evidence. The host must explicitly supply a
+trusted `ValidationProfile`; without one the existing 07 boundary remains blocked.
 `ImplementationRuntimeTest` exercises this route using the actual ten explicitly
 selected trusted documents, mocked `ResponsesClient` responses, and temporary
 source and target repositories. This is an offline execution proof. Live provider
@@ -23,7 +25,7 @@ model assertions cannot supply these predicates. Missing static authority still
 blocks at `VALIDATION_EXECUTION_POLICY_AND_OBLIGATION_MECHANISM_REQUIRED`.
 Unsupported ownership, paths, contracts or prerequisites block/fail before the
 first grant. Preflight captures the target baseline and verifies source and target
-are unchanged. No validation policy or 07 execution capability is asserted.
+are unchanged. Validation authority is issued separately after 06 MASTER acceptance.
 
 The public Java entry point accepts explicit trusted root, `MigrationInput`,
 `ControlledHarness.Config`, and a host-supplied `ResponsesClient`.
@@ -139,15 +141,67 @@ context and all existing scanner limits; individual model artifacts are never
 split. This prevents repeated aggregate history from exhausting one inspection
 budget without removing credential checks or exact retained evidence.
 
-07 remains unavailable in `ControlledPipeline`, including after all four step
-acceptances. Pre-existing isolated static-validation helpers are not dispatched
-by this route. There is no validation command runner or live E2E proof.
+### Controlled 07 validation
+
+The six-argument `ControlledPipeline` constructor accepts a host-created
+`ValidationProfile.controlledJavaContractTest(hostReviewedSources)`. This explicit
+opt-in supports the tiny Java fixture, whose POM declares no test framework or
+build plugins. `CONTROLLED_JAVA_CONTRACT_TEST` compiles exactly four pinned source
+files with the installed JDK and executes `ReadItemContractTest.verifiesIdentity`.
+The host must independently review and trust those complete source bytes; neither
+model output nor caller routing JSON can select this profile or its approved bytes.
+This is a fixed fixture profile, not a Maven runner or general Java test discovery.
+
+The validation command, exact argument vector, executable/worker fingerprints,
+working root, empty environment, five-second timeout and output scopes are
+host-owned. There is no arbitrary shell, command/argument/cwd/env input, stdin,
+network tool, Git operation or 07 repository mutation tool. Compiler annotation
+processing and implicit source discovery are disabled. The model's sole request
+is `RUN_VALIDATION` with its invocation, role, operation ID and authority ID.
+
+An immutable, single-use authority binds the run, 07 invocation, accepted plan,
+all 03–06 result fingerprints and MASTER acceptances, target filesystem identity,
+profile, exact launch definition and replay identity. Immediately before launch,
+the host revalidates accepted lineage, source immutability, implementation state,
+root identities, pinned source bytes and an initially absent output directory.
+Mode observations retain the original source permissions and expected implementation
+permissions across 03–06; entering 07 cannot adopt permission drift as a baseline.
+Drift blocks execution. No project wrapper or build script is discovered or run.
+
+After execution, bounded snapshots compare the source and implementation baseline.
+Only this profile's `target/**` output is classified `VALIDATION_EPHEMERAL_EFFECT`;
+its binary files are fingerprinted without text decoding. Source and implementation
+permission/mode changes are detected as well as content and identity changes.
+Symlinks, hardlinks,
+root replacement, Git metadata, source/configuration changes and effects elsewhere
+fail closed. Existing snapshot bounds remain 1 MiB/file, 2,048 entries and 16 MiB
+content per repository; oversized or unsafe observations never support PASS.
+These remain point-in-time checks, not OS sandboxing or protection against transient
+changes restored between observations. Executed fixture code must be host-trusted.
+
+Each process stream retains at most 8 KiB (16 KiB total), drains excess output,
+and reports retained-byte fingerprints, observed counts, truncation and completion.
+No raw build log excerpts enter artifacts. Retained validation facts have a 256 KiB
+cap; oversized effect sets retain a fingerprint, count and bounded examples, mark
+full evidence unavailable, and cannot pass. Evidence bounds never downgrade a known
+FAILED process/effect outcome to BLOCKED. Terminal observations preserve previously
+observed unauthorized effects even if a later callback restores the files. Timeout kills the process and observed
+descendants. Nonzero exit and timeout remain FAILED; inability to safely launch is
+BLOCKED. Unknown/incomplete execution or repository observations cannot pass.
+
+The strict `VALIDATION_RESULT` binds the authority, invocation, predecessor lineage,
+host execution reference, exit/timeout, exact observed repository effects, status
+and failures. Host facts override model claims. MASTER receives the result and
+independent evidence, and its acceptance is required for final SUCCESS. Host
+execution facts and effects survive later journal/report rejection in the terminal
+summary. No rollback or durable crash recovery is claimed. Live provider E2E
+remains unproven; this is not production readiness.
 
 Run `bash harness/test.sh` to compile the isolated Java harness and execute all
-six groups: `HarnessTest`, `SourceContractTest`, `ArtifactContractTest`,
-`BrokerTest`, `RuntimeTest`, and `ImplementationRuntimeTest`. Tests use mocks and
+seven groups: `HarnessTest`, `SourceContractTest`, `ArtifactContractTest`,
+`BrokerTest`, `RuntimeTest`, `ImplementationRuntimeTest`, and `ValidationRuntimeTest`. Tests use mocks and
 temporary fixtures only; they do not resolve dependencies, execute project build
-scripts or call an API.
+scripts or call an API. The validation group launches the fixed local JDK worker.
 
 ## Original FOUNDATION_ONLY profile (still supported)
 
@@ -343,7 +397,7 @@ From this repository, run only:
 bash harness/test.sh
 ```
 
-This compiles the harness and runs all six check groups in an isolated temporary
+This compiles the harness and runs all seven check groups in an isolated temporary
 directory. Runtime checks use mocked transports and fixture
 repositories. Contract checks parse the authoritative Markdown JSON structures,
 check normative rules and exact trusted fingerprints, and verify that variable
@@ -351,8 +405,9 @@ caller data is representable. They also scan the complete current `MASTER.md`
 and freeze the actual ten-document trusted chain through the public host path,
 with transport methods that fail if called. They do not execute source discovery
 or planning themselves; the runtime groups execute the mocked controlled route.
-The script does not invoke Maven/Gradle, compile application
-sources, run project tests, execute target code, or call the network. Fixtures
+The script does not invoke Maven/Gradle, run this repository’s application tests,
+or call the network. Its validation group compiles and executes only host-approved
+temporary fixture code through the fixed profile. Fixtures
 are created beneath the canonical `${TMPDIR:-/tmp}` directory,
 outside any real target. No API key is required or read by these tests.
 
@@ -362,7 +417,7 @@ Live runtime evidence, canonical declaration/check construction and MASTER
 acceptance, accepted gate delivery to specialists, migration authority bundles,
 specialist dispatch, source and target content tools, mutation, validation, crash recovery,
 and durable evidence storage are outside `FOUNDATION_ONLY`. The current execution
-profile implements the mocked 00–06 route described above; 07 execution, live E2E,
+profile implements the mocked 00–07 route described above; live E2E,
 the YAML adapter, Git-state support, and durability/resume remain unavailable. Local foundation readiness means
 the retained MASTER creation/readback and fresh host observations are available
 for that later review. It does not mean the discovery gate passed or E2E is ready.

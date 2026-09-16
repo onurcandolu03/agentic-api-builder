@@ -13,6 +13,10 @@ public final class ControlledPipeline {
     private final ControlledHarness.Config config;
     private final ResponsesClient client;
     private final byte[] staticResolution;
+    private final ValidationProfile validationProfile;
+    private ValidationRuntime validation;
+    private RepositoryFiles validationSourceObserver, validationTargetObserver;
+    private Map<String,Object> validationSourceModes, validationTargetModes;
     private final Evidence evidence;
     private final ArtifactStore artifacts;
     private final List<Map<String,Object>> phases = new ArrayList<>();
@@ -42,6 +46,12 @@ public final class ControlledPipeline {
     /** Optional exact caller resolution supplies independent exact-file implementation predicates. */
     public ControlledPipeline(Path trustedRoot, MigrationInput input, ControlledHarness.Config config,
                               ResponsesClient client, byte[] staticResolution) {
+        this(trustedRoot, input, config, client, staticResolution, null);
+    }
+    /** Validation opt-in is a trusted host object, never model/caller JSON configuration. */
+    public ControlledPipeline(Path trustedRoot, MigrationInput input, ControlledHarness.Config config,
+                              ResponsesClient client, byte[] staticResolution, ValidationProfile validationProfile) {
+        this.validationProfile = validationProfile;
         this.trustedRoot = Objects.requireNonNull(trustedRoot); this.input = Objects.requireNonNull(input);
         this.config = Objects.requireNonNull(config); this.client = Objects.requireNonNull(client);
         this.staticResolution = staticResolution == null ? null : staticResolution.clone();
@@ -109,6 +119,14 @@ public final class ControlledPipeline {
             sourceBaseline = source.hostSnapshot(Set.of());
             targetCurrent = target.hostSnapshot(Set.of());
             targetBaseline = targetCurrent;
+            if (validationProfile != null) {
+                validationSourceObserver = new RepositoryFiles(input.sourceRoot(), sourceIdentity(), RepositoryFiles.Limits.defaults(),
+                        Set.of(), Set.of(), this::safeContent);
+                validationTargetObserver = new RepositoryFiles(input.targetRoot(), targetIdentity(), RepositoryFiles.Limits.defaults(),
+                        Set.of(), Set.of(), this::safeContent).validationOutputs();
+                validationSourceModes = validationSourceObserver.validationModes(sourceBaseline);
+                validationTargetModes = validationTargetObserver.validationModes(targetBaseline);
+            }
             recordObservation("PRE_ANALYSIS", sourceBaseline, targetCurrent);
             analyze(TrustedInputs.Role.SOURCE_ANALYSIS, "SOURCE_ANALYSIS", "source-analysis.json");
             analyze(TrustedInputs.Role.ANALYSIS, "TARGET_ANALYSIS", "target-analysis.json");
@@ -136,12 +154,13 @@ public final class ControlledPipeline {
                     "acceptedArtifacts", artifacts.views(), "nonacceptedOutputs", nonacceptedOutputs,
                     "orchestrationFailures", orchestrationFailures,
                     "finalRepositoryEffects", finalEffects,
-                    "terminalSummary", terminalSummary, "validationExecuted", false,
+                    "terminalSummary", terminalSummary, "validationExecuted", validation != null && validation.started(),
+                    "validationEvidence", validation == null ? null : validation.facts(),
                     "implementationLedger", implementation == null ? List.of() : implementation.ledger(),
                     "gateArtifacts", gates == null ? null : gates.delivery(),
                     "evidence", evidence.snapshot(), "realProviderE2EProven", false,
                     "limitations", List.of("CURRENT_SESSION_IN_MEMORY", "POINT_IN_TIME_FILESYSTEM_CHECKS",
-                            "NO_PROCESS_OR_NETWORK_TOOLS", "NO_GIT_STATE_IMPLEMENTATION", "NO_LIVE_PROVIDER_VERIFICATION"));
+                            "NO_GENERIC_PROCESS_OR_NETWORK_TOOLS", "NO_GIT_STATE_IMPLEMENTATION", "NO_LIVE_PROVIDER_VERIFICATION"));
             screenFinalReport(report);
         } catch (RuntimeException rejected) {
             List<Map<String,Object>> fallbackFailures = new ArrayList<>(orchestrationFailures);
@@ -189,7 +208,8 @@ public final class ControlledPipeline {
         effects.put("rollback", "NOT_PERFORMED");
         return Json.object("runId", roles == null ? null : roles.runId(), "status", status, "code", code,
                 "finalRepositoryEffects", effects, "acceptedArtifacts", accepted, "nonacceptedOutputs", nonaccepted,
-                "validationExecuted", false, "realProviderE2EProven", false,
+                "validationExecuted", validation != null && validation.started(),
+                "validationEvidence", validation == null ? null : validation.facts(), "realProviderE2EProven", false,
                 "orchestrationFailures", orchestrationFailures);
     }
 
@@ -304,7 +324,7 @@ public final class ControlledPipeline {
             throw new IllegalStateException("INITIAL_REGISTRATION_ONLY_WITHOUT_GATES");
         RoleExecutor.Invocation invocation = roles.begin(TrustedInputs.Role.MASTER, bundleFingerprint, authorities(), null);
         Map<String,Object> gateDelivery = gates == null ? null : gates.check(
-                action.equals("ACCEPT_RUNTIME_GATES") ? "INPUT_REGISTRATION" : (action.equals("ACCEPT_ARTIFACT") || action.startsWith("ACCEPT_IMPLEMENTATION"))
+                action.equals("ACCEPT_RUNTIME_GATES") ? "INPUT_REGISTRATION" : (action.equals("ACCEPT_ARTIFACT") || action.startsWith("ACCEPT_IMPLEMENTATION") || action.equals("ACCEPT_VALIDATION"))
                         ? "AUTHORITY_ACCEPTANCE" : "BEFORE_INVOCATION", invocation, authorities(), bundleFingerprint);
         Map<String,Object> proposed = Json.object("action", action, "subjectFingerprint", Json.evidenceFingerprint(details));
         RoleExecutor.Reply reply = roles.turn(invocation, Json.object("proposedDecision", proposed,
@@ -349,6 +369,12 @@ public final class ControlledPipeline {
         }
         if (implementation != null) {
             targetCurrent = expectedTarget();
+            if (validationProfile != null && operation.equals("CREATE_TARGET_FILE")) {
+                var actualModes = map(validationTargetObserver.validationModes(targetCurrent).get("modes"));
+                var expectedModes = new LinkedHashMap<>(map(validationTargetModes.get("modes")));
+                expectedModes.put(path, actualModes.get(path));
+                validationTargetModes = Json.object("modes", expectedModes);
+            }
             unchanged();
         }
         if (operation.startsWith("READ_") || operation.startsWith("SEARCH_")) observedPaths.put(path, "CONTENT");
@@ -464,7 +490,8 @@ public final class ControlledPipeline {
         Map<String,Object> preflight = Json.object("runId", roles.runId(), "runAuthorityBundle", bundle,
                 "runAuthorityBundleFingerprint", bundleFingerprint, "sourceBaseline", snapshotView(sourceBaseline),
                 "targetBaseline", snapshotView(targetBaseline), "steps", plan.steps().stream().map(ExecutionPlan.Step::assignment).toList(),
-                "mutationAuthorityIssued", false, "validationExecution", "UNAVAILABLE", "terminalBoundary", "VALIDATION_EXECUTION_RUNTIME_REQUIRED");
+                "mutationAuthorityIssued", false, "validationExecution", validationProfile == null ? "UNAVAILABLE" : validationProfile.view(),
+                "terminalBoundary", validationProfile == null ? "VALIDATION_EXECUTION_RUNTIME_REQUIRED" : "MASTER_VALIDATION_ACCEPTANCE");
         evidence.append("IMPLEMENTATION_PREFLIGHT", preflight);
         master("ACCEPT_IMPLEMENTATION_PREFLIGHT", preflight);
         unchanged();
@@ -474,11 +501,75 @@ public final class ControlledPipeline {
             implement(step, plan, artifacts.required(predecessor));
             predecessor = "IMPLEMENTATION_RESULT:" + step.id();
         }
+        if (validationProfile != null) { validate(); return; }
         unchanged();
         phases.add(Json.object("phase", "VALIDATION_BOUNDARY", "status", "BLOCKED", "reason", "VALIDATION_EXECUTION_RUNTIME_REQUIRED"));
         master("STOP_BLOCKED", Json.object("reason", "VALIDATION_EXECUTION_RUNTIME_REQUIRED",
                 "implementation", "03_06_MASTER_ACCEPTED", "validation", "NOT_PERFORMED"));
         throw new Halt("BLOCKED", "VALIDATION_EXECUTION_RUNTIME_REQUIRED");
+    }
+
+    private void validate() throws Exception {
+        RoleExecutor.Invocation invocation = roles.begin(TrustedInputs.Role.VALIDATION, bundleFingerprint, authorities(), null);
+        validation = new ValidationRuntime(validationProfile, input.targetRoot(), sourceBaseline,
+                expectedTarget(), roles.runId(), invocation, artifacts, validationSourceObserver, validationTargetObserver,
+                validationSourceModes, validationTargetModes);
+        validation.precheck();
+        gates.check("BEFORE_INVOCATION", invocation, authorities(), bundleFingerprint);
+        evidence.append("VALIDATION_AUTHORITY_ISSUED", validation.authority());
+        List<Map<String,Object>> receipts = new ArrayList<>();
+        RoleExecutor.Reply reply;
+        while (true) {
+            try {
+                reply = roles.turn(invocation, Json.object("task", "VALIDATE_CONTROLLED_TARGET", "artifactRole", "VALIDATION_RESULT",
+                    "acceptedArtifacts", artifacts.views(), "validationAuthority", validation.authority(),
+                    "hostObservedRepositoryEffects", Json.object("acceptedImplementationEffects", target.mutationEvidence(),
+                            "preValidationSourceUnchanged", true, "preValidationTargetMatchesAcceptedImplementation", true,
+                            "validation", validation.facts()), "runtimeGates", gates.delivery(),
+                    "resultContract", validation.resultContract(), "toolResults", receipts,
+                    "availableOperations", List.of("RUN_VALIDATION"), "toolProtocol", Json.object("operationId", "unique-operation",
+                            "operation", "RUN_VALIDATION", "role", invocation.role().id, "invocationId", invocation.id(),
+                            "authorityId", validation.authority().get("authorityId"))), "VALIDATION_RESULT",
+                    exact -> validation.validateResult(Json.parse(exact)));
+            } catch (RuntimeException rejected) {
+                // Transport boundary checks may notice root drift first. Retain the precise
+                // validation precondition failure without launching or reopening any capability.
+                if (!validation.started()) validation.precheck();
+                throw rejected;
+            }
+            checkLive();
+            gates.check("CONTEXT_ENTRY", invocation, authorities(), bundleFingerprint);
+            if (!reply.kind().equals("TOOL_REQUEST")) break;
+            if (!"RUN_VALIDATION".equals(reply.toolRequest().get("operation"))) throw new Halt("FAILED", "ROLE_OPERATION_DENIED");
+            validation.execute(invocation, reply.toolRequest(), artifacts);
+            // Latch failed execution before retention or any further provider interaction.
+            if (validation.status().equals("FAILED")) specialistFailure = new Halt("FAILED", validation.code());
+            evidence.append("VALIDATION_EXECUTION_OBSERVED", validation.facts());
+            if (!validation.started()) throw new Halt(validation.status(), validation.code());
+            receipts.add(validation.facts());
+        }
+        gates.check("AFTER_INVOCATION", invocation, authorities(), bundleFingerprint); roles.finish(invocation);
+        validation.validateResult(Json.parse(reply.artifactText()));
+        validation.observe();
+        if (!validation.status().equals("SUCCESS")) {
+            if (validation.status().equals("FAILED")) specialistFailure = new Halt("FAILED", validation.code());
+            master(validation.status().equals("FAILED") ? "STOP_FAILED" : "STOP_BLOCKED", Json.object("subjectInvocationId", invocation.id(), "candidateArtifactText", reply.artifactText(),
+                    "candidateFingerprint", reply.artifactFingerprint(), "hostValidationEvidence", validation.facts()));
+            throw new Halt(validation.status(), validation.code());
+        }
+        // Independently recheck all host facts after the candidate and again after MASTER.
+        validation.validateResult(Json.parse(reply.artifactText()));
+        RoleExecutor.Reply acceptance = master("ACCEPT_VALIDATION", Json.object("subjectInvocationId", invocation.id(),
+                "candidateArtifactText", reply.artifactText(), "candidateFingerprint", reply.artifactFingerprint(),
+                "validationAuthority", validation.authority(), "hostValidationEvidence", validation.facts(),
+                "acceptedPredecessors", artifacts.views()));
+        validation.observe();
+        if (!validation.status().equals("SUCCESS")) throw new Halt(validation.status(), validation.code());
+        validation.validateResult(Json.parse(reply.artifactText()));
+        artifacts.accept("VALIDATION_RESULT", reply.artifactText(), reply.binding(), reply.providerResponseId(),
+                (String)acceptance.binding().get("invocationId"), acceptance.providerResponseId());
+        phases.add(Json.object("role", invocation.role().id, "invocationId", invocation.id(), "status", "SUCCESS", "acceptanceStatus", "ACCEPTED"));
+        status = "SUCCESS"; code = "VALIDATION_MASTER_ACCEPTED";
     }
 
     private Map<String,Object> implementationBundle() {
@@ -625,14 +716,26 @@ public final class ControlledPipeline {
         if (sourceBaseline == null || targetCurrent == null) {
             finalEffects = Json.object("observation", "NOT_REACHED", "mutationAuthorityIssued", mutationAuthorityIssued); return;
         }
+        if (validation != null && validation.started()) {
+            validation.observe();
+            if (validation.status().equals("FAILED")) specialistFailure = new Halt("FAILED", validation.code());
+            else if (status.equals("SUCCESS") && !validation.status().equals("SUCCESS")) {
+                status = validation.status(); code = validation.code();
+            }
+        }
         RepositoryFiles.Snapshot observedSource = null, observedTarget = null;
         try { observedSource = source.observeTerminatedSnapshot(Set.of()); }
         catch (Exception unavailable) { /* Only this observation is unknown. */ }
-        try { observedTarget = target.observeTerminatedSnapshot(Set.of()); }
+        try { observedTarget = validation != null && validation.started() ? validation.targetSnapshot() : target.observeTerminatedSnapshot(Set.of()); }
         catch (Exception unavailable) { /* Keep an independently obtained source observation. */ }
         Boolean sourceEqual = observedSource == null ? null : sourceBaseline.equals(observedSource);
+        if (validation != null && validation.started()) {
+            var validationEffects = map(validation.facts().get("effects"));
+            if (!Boolean.TRUE.equals(validationEffects.get("sourceUnchanged"))) sourceEqual = (Boolean)validationEffects.get("sourceUnchanged");
+        }
         Boolean targetEqual = null;
-        try { targetCurrent = expectedTarget(); targetEqual = observedTarget == null ? null : targetCurrent.equals(observedTarget); }
+        try { targetCurrent = expectedTarget(); targetEqual = observedTarget == null ? null : validation != null && validation.started()
+                ? validation.terminalTargetMatches(observedTarget) : Boolean.valueOf(targetCurrent.equals(observedTarget)); }
         catch (RuntimeException unavailable) {
             orchestrationFailures.add(Json.object("stage", "TERMINAL_EFFECT_ACCOUNTING", "code", "EFFECT_ACCOUNTING_UNAVAILABLE"));
         }
@@ -658,7 +761,7 @@ public final class ControlledPipeline {
         terminateImplementation(observedTarget);
     }
     private void terminalObservationFailure(String failureStatus, String failureCode) {
-        if (code.equals("NOT_STARTED") || code.equals("VALIDATION_EXECUTION_RUNTIME_REQUIRED")) {
+        if (status.equals("SUCCESS") || code.equals("NOT_STARTED") || code.equals("VALIDATION_EXECUTION_RUNTIME_REQUIRED")) {
             status = failureStatus; code = failureCode;
         } else if (!code.equals(failureCode)) {
             orchestrationFailures.add(Json.object("stage", "TERMINAL_REPOSITORY_OBSERVATION", "code", failureCode));
@@ -700,7 +803,7 @@ public final class ControlledPipeline {
             case SOURCE_ANALYSIS -> List.of("READ_SOURCE_TEXT", "LIST_SOURCE_PATHS", "SEARCH_SOURCE_TEXT", "INSPECT_SOURCE_METADATA");
             case ANALYSIS -> List.of("READ_TARGET_TEXT", "LIST_TARGET_PATHS", "SEARCH_TARGET_TEXT", "INSPECT_TARGET_METADATA");
             case DOMAIN, PERSISTENCE, SERVICE, TESTS -> List.of("READ_TARGET_TEXT", "CREATE_TARGET_FILE", "WRITE_TARGET_TEXT");
-            case VALIDATION -> List.of("READ_TARGET_TEXT");
+            case VALIDATION -> List.of();
             default -> List.of();
         };
     }

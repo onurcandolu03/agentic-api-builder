@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Compile/run only the isolated harness. Never invoke project tooling or download jars.
+# Compile/run the isolated harness and fixed validation fixtures; never download jars or invoke project scripts.
 harness_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 if [[ -n "${HARNESS_JACKSON_CLASSPATH:-}" ]]; then
   harness_classpath="$HARNESS_JACKSON_CLASSPATH"
@@ -28,3 +28,4 @@ java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness
 java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.BrokerTest "$harness_temp"
 java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.RuntimeTest "$harness_temp" "$harness_root/.."
 java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.ImplementationRuntimeTest "$harness_temp" "$harness_root/.."
+java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.ValidationRuntimeTest "$harness_temp" "$harness_root/.."
