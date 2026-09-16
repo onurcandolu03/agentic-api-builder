@@ -96,7 +96,7 @@ public final class ControlledPipeline {
             }
             harness = new ControlledHarness(trustedRoot, input.sourceRoot(), input.targetRoot(), config, client, true);
             harness.freezeTrustedInputs(); harness.registerTargetMetadata();
-            roles = new RoleExecutor(harness, evidence);
+            roles = new RoleExecutor(harness, evidence, staticResolution);
             source = new SourceBroker(harness.executionSourceBoundary(), RepositoryFiles.Limits.defaults(),
                     Set.of(), Set.of(), this::safeContent);
             target = new TargetContentBroker(harness.executionTargetMetadata(), RepositoryFiles.Limits.defaults(),

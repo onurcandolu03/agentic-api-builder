@@ -18,12 +18,17 @@ final class RoleExecutor {
     private final List<Map<String,Object>> history = new ArrayList<>();
     private final Set<String> operationIds = new HashSet<>();
     private final String runId;
+    private final Map<String,Object> hostTaskContext;
     private Invocation active;
     private String previousResponseId, previousInvocationId;
     private int invocationCounter, turnCounter;
 
-    RoleExecutor(ControlledHarness harness, Evidence evidence) {
+    RoleExecutor(ControlledHarness harness, Evidence evidence) { this(harness, evidence, null); }
+    RoleExecutor(ControlledHarness harness, Evidence evidence, byte[] staticResolution) {
         this.harness = harness; this.evidence = evidence; this.runId = harness.executionContextId();
+        this.hostTaskContext = staticResolution == null ? null : MigrationInput.immutable(Json.object(
+                "format", "HOST_STATIC_TASK_CONTEXT_V1", "exactText", MigrationInput.utf8(staticResolution),
+                "fingerprint", Json.fingerprint("CALLER_RESOLUTION", staticResolution)));
     }
     String nextInvocationId() {
         if (active != null) throw new IllegalStateException("INVOCATION_ALREADY_ACTIVE");
@@ -54,7 +59,7 @@ final class RoleExecutor {
                 "inputArtifactFingerprints", invocation.inputFingerprints(),
                 "invocationArtifactFingerprint", invocation.invocationArtifactFingerprint());
         Reply[] candidate = new Reply[1];
-        String response = harness.executionTurn(invocation.role(), previousResponseId, binding, data, text -> {
+        String response = harness.executionTurn(invocation.role(), previousResponseId, binding, hostTaskContext, data, text -> {
             evidence.safe(text);
             Map<String,Object> output = Json.parse(text);
             ExecutionPlan.fields(output, Set.of("format", "binding", "kind", "artifactText", "artifactFingerprint",
@@ -77,7 +82,9 @@ final class RoleExecutor {
                         throw new IllegalArgumentException("ARTIFACT_TEXT_REQUIRED");
                     artifactText = exactText;
                     fingerprint = Json.fingerprint(artifactRole, artifactText.getBytes(StandardCharsets.UTF_8));
-                    if (!fingerprint.equals(output.get("artifactFingerprint")))
+                    // Null requests host binding. A supplied legacy hash is only a checked claim,
+                    // never authority. The exact provider artifact bytes are not rewritten.
+                    if (output.get("artifactFingerprint") != null && !fingerprint.equals(output.get("artifactFingerprint")))
                         throw new IllegalArgumentException("ARTIFACT_FINGERPRINT_MISMATCH");
                     artifactValidator.accept(artifactText);
                 }

@@ -30,7 +30,7 @@ are unchanged. Validation authority is issued separately after 06 MASTER accepta
 The public Java entry point accepts explicit trusted root, `MigrationInput`,
 `ControlledHarness.Config`, and a host-supplied `ResponsesClient`.
 `ControlledPipeline.runJson(...)` blocks missing routing before provider access.
-There is no live CLI or credential loading in this launcher. `MigrationInput`
+`LiveLauncher` adds the fixed-fixture live CLI described below. `MigrationInput`
 reuses cached Jackson JSON parsing, preserves exact caller UTF-8 bytes and their
 fingerprint, and retains unknown structured fields, including decimal values.
 It recognizes `migration.settings.sourceProjectPath`, `targetProjectPath`, and
@@ -51,6 +51,12 @@ items. Role selection, tool requests and replies are strict JSON;
 artifact text preserves legal whitespace rather than being treated as an
 identifier. Structured output is validated before transport retention; readback
 must finish before tool execution or artifact handoff.
+Artifact replies use `artifactFingerprint: null`; the host computes the fingerprint
+from the exact UTF-8 artifact text and binds it to the verified invocation/response.
+A supplied legacy fingerprint must still match. Hashing does not confer acceptance.
+The separate outer `hostTaskContext` supplies the exact retained static resolution
+and its fingerprint, also included in the invocation's input fingerprints. Model
+output and caller routing fields cannot replace this authority.
 
 `ExecutionGates` retains canonical source/discovery declarations and checks over
 the actual host configuration, trusted registry, launch selection, current
@@ -198,10 +204,60 @@ summary. No rollback or durable crash recovery is claimed. Live provider E2E
 remains unproven; this is not production readiness.
 
 Run `bash harness/test.sh` to compile the isolated Java harness and execute all
-seven groups: `HarnessTest`, `SourceContractTest`, `ArtifactContractTest`,
-`BrokerTest`, `RuntimeTest`, `ImplementationRuntimeTest`, and `ValidationRuntimeTest`. Tests use mocks and
+eight groups: `HarnessTest`, `SourceContractTest`, `ArtifactContractTest`,
+`BrokerTest`, `RuntimeTest`, `ImplementationRuntimeTest`, `ValidationRuntimeTest`, and `LiveLauncherTest`. Tests use mocks and
 temporary fixtures only; they do not resolve dependencies, execute project build
 scripts or call an API. The validation group launches the fixed local JDK worker.
+
+## First live fixture invocation
+
+The host launcher requires JDK 21+ and the same cached Jackson jars as `test.sh`
+(or an explicit host `HARNESS_JACKSON_CLASSPATH`). It never downloads dependencies.
+Prepare a fresh fixture under a non-Git directory:
+
+```bash
+bash harness/live.sh prepare /private/tmp
+```
+
+This prints the absolute path of a new `controlled-live-*/migration.json`. The
+source contains only `src/LegacyOperation.java`; its directories and file have no
+write permission bits. The disposable target initially contains `pom.xml` and
+`src/TargetConventions.java`. The POM is existing synthetic descriptive metadata;
+its declared dependency is never resolved and no Maven/Spring/Gradle build runs.
+The fixed code in `LiveFixture.java` is reviewed host authority: an identity method,
+a String record, a pure mapper/service and one assertion, with no I/O or process calls.
+The same four approved strings supply both independent static predicates and
+`CONTROLLED_JAVA_CONTRACT_TEST` source pinning. They are never loaded from target
+files or caller JSON. Static rules require 02 to plan the four component decisions
+in domain, mapper, service, test order, using their exact responsibility descriptions
+and paths; existing semantic ownership and traceability checks still apply.
+
+With `OPENAI_API_KEY` already set privately in the host environment, run:
+
+```bash
+bash harness/live.sh run /absolute/path/to/agentic-api-builder \
+  /private/tmp/controlled-live-XXXXXXXX/migration.json \
+  "$LIVE_MODEL" 16384
+```
+
+`LIVE_MODEL` is a host-selected Responses model ID with sufficient context/output
+capacity and account access. The CLI accepts exactly trusted root, UTF-8 JSON input,
+model and positive max-output-token count; no credential, endpoint, static-authority,
+profile, command or environment override is accepted from migration JSON or the model.
+Credentials come only from `HttpResponsesClient.fromEnvironment()` reading
+`OPENAI_API_KEY`. Do not put keys in JSON, command arguments, transcripts or files.
+The launcher constructs the full six-argument pipeline and runs MASTER → 00–07,
+emitting screened JSON evidence to stdout. Exit codes are 0 SUCCESS, 2 BLOCKED,
+and 1 FAILED/launch rejection. Raw exception details are suppressed.
+
+Use a fresh prepared target for every attempt; accepted or unaccepted mutations
+remain in the disposable target, and no rollback is performed. The source stays
+read-only throughout the run. No provider call is made by `prepare` or the tests.
+Before the first live call, supply a valid environment key, select an accessible
+model and allow HTTPS access to `api.openai.com`. Provider transport compatibility,
+model contract compliance, context/output capacity and the complete live result
+remain unproven until that invocation. The existing 30-second request timeout and
+96-turn bound remain unchanged.
 
 ## Original FOUNDATION_ONLY profile (still supported)
 
@@ -212,7 +268,7 @@ profile and its supported brokers/gates are described above.
 `FOUNDATION_ONLY` supplies host evidence for a subsequent pre-analysis
 instruction-discovery review. This profile does not run the migration workflow, implement
 MASTER's acceptance predicates, issue `DISCOVERY_CONTROL_CHECK_V1`, or authorize
-source or target content access. There is deliberately no executable live launcher.
+source or target content access. The live launcher above uses the controlled execution profile.
 
 `ControlledHarness` owns one in-memory state, a fixed trusted chain, an immutable
 request configuration, a target broker, an optional source metadata boundary,

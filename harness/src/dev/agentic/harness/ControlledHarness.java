@@ -202,7 +202,7 @@ public final class ControlledHarness {
 
     /** Host-only transport path. The coordinator, never response data, supplies role and binding. */
     synchronized String executionTurn(TrustedInputs.Role selectedRole, String expectedPrevious,
-                                      Map<String, Object> binding, Map<String, Object> data,
+                                      Map<String, Object> binding, Map<String, Object> hostTaskContext, Map<String, Object> data,
                                       Consumer<String> validateStructuredOutput) {
         beginOperation();
         try {
@@ -215,6 +215,7 @@ public final class ControlledHarness {
             role = selectedRole;
             roleSwitchCounter++;
             String marker = Json.write(Json.object("format", "HOST_EXECUTION_TURN_V1", "binding", binding,
+                    "hostTaskContext", hostTaskContext,
                     "data", Json.object("format", "UNTRUSTED_DATA_V1", "value", data)));
             return providerTurn(responseId, marker, Objects.requireNonNull(validateStructuredOutput));
         } finally { operationActive = false; }

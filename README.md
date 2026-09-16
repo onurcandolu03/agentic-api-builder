@@ -50,15 +50,18 @@ script fails if they are missing and never downloads dependencies.
 bash harness/test.sh
 ```
 
-The suite compiles the harness in a temporary directory and runs 460 checks:
+The suite compiles the harness in a temporary directory and runs 468 checks:
 70 harness, 12 source contract, 145 artifact contract, 29 broker, 95 execution
-runtime, 56 implementation runtime, and 53 validation runtime. Provider responses
+runtime, 56 implementation runtime, 53 validation runtime, and 8 live preparation. Provider responses
 are mocked; validation executes only the fixed local JDK worker with approved
 temporary fixture sources. No API key is required.
 
 ## Current limits
 
 The offline suite exercises the controlled 00–07 route. Live provider E2E remains
-unproven, and there is no live CLI. General project validation, YAML input,
+unproven. The [fixed-fixture live launcher](harness/README.md#first-live-fixture-invocation)
+prepares a read-only source and disposable target and accepts host model/token
+configuration; credentials come only from `OPENAI_API_KEY` in the host environment.
+General project validation, YAML input,
 execution-profile Git-state support, durable recovery, and resume remain outside
 the supported runtime. This is not a production-readiness claim.
