@@ -14,7 +14,7 @@ public final class LiveLauncher {
                 return;
             }
             if (args.length != 5 || !args[0].equals("run")) {
-                System.err.println("Usage: prepare <non-git-parent> | run <trusted-root> <migration.json> <model> <max-output-tokens>");
+                System.err.println("Usage: prepare <non-git-parent> | run <trusted-root> <migration.json|migration.yaml|migration.yml> <model> <max-output-tokens>");
                 System.exit(2);
                 return;
             }
@@ -33,9 +33,7 @@ public final class LiveLauncher {
     }
 
     static MigrationInput load(Path file) throws Exception {
-        try (var stream = Files.newInputStream(file)) {
-            return MigrationInput.fromJson(stream.readNBytes(MigrationInput.MAX_BYTES + 1));
-        }
+        return MigrationConfigLoader.load(file);
     }
 
     /** Package-private offline transport seam; the CLI uses the frozen host provider profile. */

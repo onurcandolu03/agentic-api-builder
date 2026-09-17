@@ -3,6 +3,10 @@ set -euo pipefail
 
 # Compile/run the isolated harness and fixed validation fixtures; never download jars or invoke project scripts.
 harness_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+if [[ $# -gt 1 || ( $# -eq 1 && "$1" != "migration-input" ) ]]; then
+  printf 'Usage: test.sh [migration-input]\n' >&2
+  exit 2
+fi
 if [[ -n "${HARNESS_JACKSON_CLASSPATH:-}" ]]; then
   harness_classpath="$HARNESS_JACKSON_CLASSPATH"
 else
@@ -11,6 +15,7 @@ else
   harness_classpath+=":$harness_cache/tools/jackson/core/jackson-databind/3.1.5/jackson-databind-3.1.5.jar"
   harness_classpath+=":$harness_cache/com/fasterxml/jackson/core/jackson-annotations/2.21/jackson-annotations-2.21.jar"
 fi
+harness_classpath+=":${HARNESS_YAML_CLASSPATH:-$HOME/.m2/repository/org/yaml/snakeyaml/2.6/snakeyaml-2.6.jar}"
 IFS=: read -r -a harness_jars <<< "$harness_classpath"
 for harness_jar in "${harness_jars[@]}"; do
   [[ -f "$harness_jar" ]] || { printf 'Missing cached harness dependency: %s\n' "$harness_jar" >&2; exit 1; }
@@ -22,6 +27,11 @@ mkdir "$harness_temp/classes"
 javac --release 21 -cp "$harness_classpath" -d "$harness_temp/classes" \
   "$harness_root"/src/dev/agentic/harness/*.java \
   "$harness_root"/test/dev/agentic/harness/*.java
+if [[ "${1:-}" == "migration-input" ]]; then
+  java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.MigrationConfigLoaderTest "$harness_temp"
+  java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.LiveLauncherTest "$harness_temp" "$harness_root/.." input-guards
+  exit 0
+fi
 java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.HarnessTest "$harness_temp"
 java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.SourceContractTest "$harness_root/.." "$harness_temp"
 java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.ArtifactContractTest
@@ -30,4 +40,5 @@ java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness
 java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.ImplementationRuntimeTest "$harness_temp" "$harness_root/.."
 java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.ValidationRuntimeTest "$harness_temp" "$harness_root/.."
 java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.LiveLauncherTest "$harness_temp" "$harness_root/.."
+java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.MigrationConfigLoaderTest "$harness_temp"
 java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.ProviderTransportTest "$harness_temp"

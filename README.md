@@ -24,7 +24,7 @@ a fixed Java contract-test fixture, not arbitrary project builds.
 
 The pipeline is provider-independent. The host-owned `ProviderTransport` boundary
 currently has one concrete adapter: direct OpenAI Responses, using the existing
-HTTP transport. `OPENAI_API_KEY` is specific to that adapter. Migration JSON cannot
+HTTP transport. `OPENAI_API_KEY` is specific to that adapter. Migration JSON/YAML cannot
 select providers, credentials, endpoints, executables or validation profiles.
 OpenCode/company integration is a future reviewed adapter; its E2E behavior is
 unproven. It must not own source/target authority, validation, MASTER acceptance
@@ -48,17 +48,24 @@ The canonical suite requires these existing local jars:
 - `tools.jackson.core:jackson-core:3.1.5`
 - `tools.jackson.core:jackson-databind:3.1.5`
 - `com.fasterxml.jackson.core:jackson-annotations:2.21`
+- `org.yaml:snakeyaml:2.6` (host-side data-only YAML event parser)
 
 The test script looks in the corresponding paths under `~/.m2/repository` by
 default. If the jars are stored elsewhere, set `HARNESS_JACKSON_CLASSPATH` to their
-colon-separated paths. Supply these dependencies before running the suite; the
+colon-separated Jackson paths and `HARNESS_YAML_CLASSPATH` to the SnakeYAML jar.
+Supply these dependencies before running the suite; the
 script fails if they are missing and never downloads dependencies.
 
 ```bash
 bash harness/test.sh
 ```
 
-The suite compiles the harness in a temporary directory and includes the original 468 checks plus 25 provider-boundary checks:
+For only offline config/YAML and launcher input guards, use
+`bash harness/test.sh migration-input`. This does not run the canonical suite,
+provider scenarios or the validation worker.
+
+The suite compiles the harness in a temporary directory and includes migration
+config checks alongside the original 468 checks plus 25 provider-boundary checks:
 70 harness, 12 source contract, 145 artifact contract, 29 broker, 95 execution
 runtime, 56 implementation runtime, 53 validation runtime, 8 live preparation, and 25 provider boundary. Provider responses
 are mocked; validation executes only the fixed local JDK worker with approved
@@ -70,6 +77,10 @@ The offline suite exercises the controlled 00–07 route. Live provider E2E rema
 unproven. The [fixed-fixture live launcher](harness/README.md#first-live-fixture-invocation)
 prepares a read-only source and disposable target and accepts host model/token
 configuration; credentials come only from `OPENAI_API_KEY` in the host environment.
-General project validation, YAML input,
+The launcher accepts `.json`, `.yaml`, and `.yml`. YAML is data-only and normalizes
+through the same `MigrationInput` semantics as JSON. Provider, credentials,
+endpoints, static authority, validation, filesystem and process authority remain
+host-owned. See [YAML rules](harness/README.md#migration-config-formats).
+General project validation,
 execution-profile Git-state support, durable recovery, and resume remain outside
 the supported runtime. This is not a production-readiness claim.

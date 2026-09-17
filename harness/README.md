@@ -79,8 +79,8 @@ reuses cached Jackson JSON parsing, preserves exact caller UTF-8 bytes and their
 fingerprint, and retains unknown structured fields, including decimal values.
 It recognizes `migration.settings.sourceProjectPath`, `targetProjectPath`, and
 `sourceOperationName` (also their flat equivalents). Additional fields remain
-caller data for specialists; they do not grant runtime authority. A safe YAML
-adapter remains future launcher work. No dependencies were added.
+caller data for specialists; they do not grant runtime authority. The host config
+loader also accepts YAML, as described under [migration config formats](#migration-config-formats).
 
 `RoleExecutor` selects exactly one registered role per invocation. Its outer
 `HOST_EXECUTION_TURN_V1` binding records session/run, invocation, predecessor
@@ -248,15 +248,16 @@ summary. No rollback or durable crash recovery is claimed. Live provider E2E
 remains unproven; this is not production readiness.
 
 Run `bash harness/test.sh` to compile the isolated Java harness and execute all
-nine groups: `HarnessTest`, `SourceContractTest`, `ArtifactContractTest`,
-`BrokerTest`, `RuntimeTest`, `ImplementationRuntimeTest`, `ValidationRuntimeTest`, `LiveLauncherTest`, and `ProviderTransportTest`. Tests use mocks and
+ten groups: `HarnessTest`, `SourceContractTest`, `ArtifactContractTest`,
+`BrokerTest`, `RuntimeTest`, `ImplementationRuntimeTest`, `ValidationRuntimeTest`, `LiveLauncherTest`, `MigrationConfigLoaderTest`, and `ProviderTransportTest`. Tests use mocks and
 temporary fixtures only; they do not resolve dependencies, execute project build
 scripts or call an API. The validation group launches the fixed local JDK worker.
 
 ## First live fixture invocation
 
-The host launcher requires JDK 21+ and the same cached Jackson jars as `test.sh`
-(or an explicit host `HARNESS_JACKSON_CLASSPATH`). It never downloads dependencies.
+The host launcher requires JDK 21+ and the same cached Jackson and SnakeYAML 2.6
+jars as `test.sh` (or explicit host `HARNESS_JACKSON_CLASSPATH` and
+`HARNESS_YAML_CLASSPATH`). It never downloads dependencies.
 Prepare a fresh fixture under a non-Git directory:
 
 ```bash
@@ -285,11 +286,11 @@ bash harness/live.sh run /absolute/path/to/agentic-api-builder \
 ```
 
 `LIVE_MODEL` is a host-selected Responses model ID with sufficient context/output
-capacity and account access. The CLI accepts exactly trusted root, UTF-8 JSON input,
+capacity and account access. The CLI accepts exactly trusted root, UTF-8 JSON/YAML input,
 model and positive max-output-token count; no credential, endpoint, static-authority,
-profile, command or environment override is accepted from migration JSON or the model.
+profile, command or environment override is accepted from migration JSON/YAML or the model.
 Credentials come only from `HttpResponsesClient.fromEnvironment()` reading
-`OPENAI_API_KEY`. Do not put keys in JSON, command arguments, transcripts or files.
+`OPENAI_API_KEY`. Do not put keys in config, command arguments, transcripts or files.
 The launcher constructs the full six-argument pipeline and runs MASTER → 00–07,
 emitting screened JSON evidence to stdout. Exit codes are 0 SUCCESS, 2 BLOCKED,
 and 1 FAILED/launch rejection. Raw exception details are suppressed.
@@ -302,6 +303,68 @@ model and allow HTTPS access to `api.openai.com`. Provider transport compatibili
 model contract compliance, context/output capacity and the complete live result
 remain unproven until that invocation. The existing 30-second request timeout and
 96-turn bound remain unchanged.
+
+## Migration config formats
+
+`LiveLauncher` selects serialization only from the host-provided filename's
+case-sensitive `.json`, `.yaml`, or `.yml` extension. Other extensions reject;
+contents cannot select a parser or provider. JSON continues through the existing
+strict parser with exact bytes and fingerprints unchanged.
+
+YAML uses pinned host-side `org.yaml:snakeyaml:2.6`, read from the local Maven cache
+or the host's `HARNESS_YAML_CLASSPATH`. No runtime dependency download occurs.
+Only its syntax-event parser is used: no YAML object constructors, class loading,
+implicit type resolver, or application object binding. The loader emits bounded
+strict JSON and calls the existing `MigrationInput.fromJson` validation path.
+The resulting `MigrationInput` retains normalized JSON text/bytes and their
+fingerprint; YAML comments, formatting and original byte identity are not retained.
+Equivalent JSON and YAML have equal routing and caller-data semantics, while
+serialization fingerprints need not match.
+
+For example, the existing flat routing form can be written as:
+
+```yaml
+sourceProjectPath: /absolute/source
+targetProjectPath: /absolute/target
+sourceOperationName: readItem
+```
+
+The nested `migration.settings` form is also supported. Existing required string,
+absolute normalized path, non-overlapping root and secret-screening checks apply
+unchanged. Unknown fields are retained as untrusted caller data, exactly as in
+existing JSON; a misspelled required routing field still rejects. They cannot
+select providers, endpoints, credentials, static authority, validation profiles,
+filesystem grants or executables/commands. These remain host-owned. There is no
+environment interpolation, expression execution, file inclusion or URL fetching.
+
+Scalar rules are fixed and independent of YAML version directives:
+
+- Quoted and block scalars are strings, including quoted `"123"` and `"true"`.
+- Plain `true`, `false`, `null`, and JSON-number syntax use existing JSON types,
+  including integers and decimal values. Empty plain values become null; required
+  routing values still reject null, booleans and numbers.
+- Other plain scalars are strings: `yes`, `on`, `TRUE`, `~`, `012`, `0x10`, `.nan`
+  and dates have no special YAML typing. Quote them to make string intent explicit.
+- Mapping keys must be strings; boolean/null/number-looking keys must be quoted.
+  Duplicate decoded keys reject at every level, including keys whose first value
+  is null. Lists and maps normalize to the same JSON containers.
+
+Explicit tags (including standard and Java/object tags), anchors, aliases,
+merge keys, complex keys, YAML version/tag directives, malformed input and multiple
+documents reject. YAML is bounded to 1 MiB of UTF-8 input and normalized JSON,
+50 nested levels and 100,000 scalar/container/key nodes. Existing JSON limits and
+validation may reject sooner. Parser errors are replaced with a fixed rejection
+code; normal launcher diagnostics contain no source excerpts or raw exceptions.
+
+Run only the offline config and launcher-input checks with:
+
+```bash
+bash harness/test.sh migration-input
+```
+
+This mode makes no provider/network calls and runs no validation worker or
+canonical suite. YAML support makes no OpenCode/company integration or real
+provider E2E claim.
 
 ## Original FOUNDATION_ONLY profile (still supported)
 
