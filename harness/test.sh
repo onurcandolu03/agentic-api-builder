@@ -30,3 +30,4 @@ java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness
 java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.ImplementationRuntimeTest "$harness_temp" "$harness_root/.."
 java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.ValidationRuntimeTest "$harness_temp" "$harness_root/.."
 java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.LiveLauncherTest "$harness_temp" "$harness_root/.."
+java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.ProviderTransportTest "$harness_temp"

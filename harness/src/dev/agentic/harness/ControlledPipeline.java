@@ -11,7 +11,7 @@ public final class ControlledPipeline {
     private final Path trustedRoot;
     private final MigrationInput input;
     private final ControlledHarness.Config config;
-    private final ResponsesClient client;
+    private final ProviderTransport client;
     private final byte[] staticResolution;
     private final ValidationProfile validationProfile;
     private ValidationRuntime validation;
@@ -51,6 +51,19 @@ public final class ControlledPipeline {
     /** Validation opt-in is a trusted host object, never model/caller JSON configuration. */
     public ControlledPipeline(Path trustedRoot, MigrationInput input, ControlledHarness.Config config,
                               ResponsesClient client, byte[] staticResolution, ValidationProfile validationProfile) {
+        this(trustedRoot, input, config, new ResponsesProtocolAdapter(client), staticResolution, validationProfile);
+    }
+
+    public ControlledPipeline(Path trustedRoot, MigrationInput input, ControlledHarness.Config config,
+                              ProviderTransport client) {
+        this(trustedRoot, input, config, client, null, null);
+    }
+    public ControlledPipeline(Path trustedRoot, MigrationInput input, ControlledHarness.Config config,
+                              ProviderTransport client, byte[] staticResolution) {
+        this(trustedRoot, input, config, client, staticResolution, null);
+    }
+    public ControlledPipeline(Path trustedRoot, MigrationInput input, ControlledHarness.Config config,
+                              ProviderTransport client, byte[] staticResolution, ValidationProfile validationProfile) {
         this.validationProfile = validationProfile;
         this.trustedRoot = Objects.requireNonNull(trustedRoot); this.input = Objects.requireNonNull(input);
         this.config = Objects.requireNonNull(config); this.client = Objects.requireNonNull(client);
@@ -64,6 +77,9 @@ public final class ControlledPipeline {
 
     /** Sparse JSON entry point: missing routing blocks before any provider call; no prompts or fallback. */
     public static Result runJson(Path trustedRoot, byte[] callerBytes, ControlledHarness.Config config, ResponsesClient client) {
+        return runJson(trustedRoot, callerBytes, config, new ResponsesProtocolAdapter(client));
+    }
+    public static Result runJson(Path trustedRoot, byte[] callerBytes, ControlledHarness.Config config, ProviderTransport client) {
         MigrationInput input;
         try { input = MigrationInput.fromJson(callerBytes); }
         catch (IllegalArgumentException rejected) {

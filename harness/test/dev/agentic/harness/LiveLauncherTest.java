@@ -9,13 +9,30 @@ import static dev.agentic.harness.RuntimeTest.*;
 /** Offline proof of the live host wiring, including null-hash replies and the real fixed JDK worker. */
 public final class LiveLauncherTest {
     public static void main(String[] args) throws Exception {
+        if (args.length != 2 && args.length != 3) throw new IllegalArgumentException("FIXTURE_ARGUMENTS_REQUIRED");
         Path temp = Path.of(args[0]).toRealPath(), trusted = Path.of(args[1]).toRealPath();
+        if (args.length == 3) {
+            if ("input-guards".equals(args[2])) {
+                inputGuards(temp, trusted);
+                return;
+            }
+            if (!List.of("success", "wrong-hash", "readback-drift", "binding-drift", "static-tamper", "master-reject")
+                    .contains(args[2])) throw new IllegalArgumentException("UNKNOWN_FOCUSED_SCENARIO");
+            scenario(temp, trusted, args[2]);
+            System.out.println("PASS live preparation " + args[2]);
+            return;
+        }
         check(LiveFixture.TEXTS.equals(ImplementationFixtures.TEXTS), "reviewed four-file bytes match existing fixture");
         check(Arrays.equals(LiveFixture.resolution(), ImplementationFixtures.resolution()), "reviewed static predicates");
         for (String fault : List.of("success", "wrong-hash", "readback-drift", "binding-drift", "static-tamper", "master-reject")) {
             scenario(temp, trusted, fault);
             System.out.println("PASS live preparation " + fault);
         }
+        inputGuards(temp, trusted);
+        System.out.println("PASS 8 live preparation checks; mocked provider, fixed local JDK validation");
+    }
+
+    private static void inputGuards(Path temp, Path trusted) throws Exception {
         Path invalid = Files.createTempFile(temp, "invalid-input-", ".json");
         for (byte[] bytes : List.of(new byte[]{(byte)0xc3, 0x28}, "{}".getBytes(StandardCharsets.UTF_8),
                 new byte[MigrationInput.MAX_BYTES + 1])) {
@@ -24,10 +41,11 @@ public final class LiveLauncherTest {
             try { LiveLauncher.load(invalid); } catch (IllegalArgumentException expected) { rejected = true; }
             check(rejected, "bounded strict UTF-8 JSON routing");
         }
+        System.out.println("PASS live preparation input routing guards");
         boolean gitRejected = false;
         try { LiveFixture.prepare(trusted); } catch (IllegalArgumentException expected) { gitRejected = true; }
         check(gitRejected, "fixture cannot be prepared inside Git");
-        System.out.println("PASS 8 live preparation checks; mocked provider, fixed local JDK validation");
+        System.out.println("PASS live preparation Git fixture guard");
     }
 
     private static void scenario(Path temp, Path trusted, String fault) throws Exception {
@@ -35,6 +53,11 @@ public final class LiveLauncherTest {
         MigrationInput original = LiveLauncher.load(inputFile);
         // Caller JSON cannot select the model, validation profile, static authority or executable.
         var caller = Json.parse(original.text());
+        caller.put("provider", "unregistered-company-profile");
+        caller.put("endpoint", "https://untrusted.invalid");
+        caller.put("credentialSource", "UNTRUSTED_ENVIRONMENT");
+        caller.put("executable", "/untrusted/program");
+        caller.put("command", List.of("untrusted-command"));
         caller.put("model", "caller-must-not-select");
         caller.put("maxOutputTokens", 1);
         caller.put("staticResolution", Json.object("expectedText", "untrusted override"));

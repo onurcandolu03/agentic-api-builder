@@ -1,4 +1,47 @@
-# Controlled Responses harness
+# Controlled provider-neutral harness
+
+## Provider boundary
+
+The migration pipeline is provider-independent. `ControlledPipeline`, `RoleExecutor`
+and `ControlledHarness` own orchestration, trusted roles, static task authority,
+source read-only enforcement, target grants, exact artifact hashing, readback
+correlation, lineage, MASTER acceptance and validation. Repository contents and
+additional migration fields remain untrusted data.
+
+`ProviderTransport` is a trusted host adapter contract for logical turns, immutable
+prepared payloads, creation observations and independently retrieved context.
+The host freezes, screens and fingerprints the exact prepared payload before
+passing the same object to dispatch. Adapters must send that payload without
+reconstruction and expose actual protocol facts, not fabricated echoes. Adapters
+are reviewed trusted host code, not a sandbox for arbitrary implementations.
+The host verifies completion, configuration, predecessor, creation/readback identity
+and output, and ordered context membership against its retained chain. Native IDs
+are opaque; every adapter must support independent readback, ordered context and
+frozen dispatch. Missing capabilities fail closed; there is no fallback or reset.
+Exact raw wire evidence is retained alongside neutral observations. Repeated large
+instruction/output fields are represented by host fingerprints where exact copies
+already exist; this does not modify artifact text or relax direct readback equality.
+`ExecutionGates` uses the retained logical invocation binding and the fingerprint
+of the exact dispatched payload, without parsing a provider's wire JSON.
+
+`ResponsesProtocolAdapter` is the current concrete implementation. It preserves
+Responses request construction, continuation, completion/configuration checks,
+output extraction, native ID validation and bounded input-item pagination.
+`ResponsesClient` and `HttpResponsesClient` remain the low-level Responses transport;
+legacy host constructors wrap them in the adapter. `OPENAI_API_KEY` belongs only
+to this direct OpenAI transport, whose endpoint and security restrictions are fixed.
+
+`HostProviderConfiguration` is an immutable, closed host profile factory. The
+launcher selects `DIRECT_OPENAI_RESPONSES`; unknown profiles reject before opening
+a transport. Migration JSON cannot select provider, model, endpoint, credentials,
+executable, command, validation profile or static authority. No URL override,
+class loading, provider CLI, automatic retry or fallback was added.
+
+OpenCode/company integration requires a future reviewed adapter and concrete
+company protocol/capability information. It is not implemented or proven E2E.
+OpenCode must not become the authority for source/target access, validation,
+MASTER acceptance or process execution. A provider that cannot supply the required
+readback and context observations is unsupported. Real provider E2E remains unproven.
 
 ## Current execution runtime
 
@@ -28,7 +71,8 @@ first grant. Preflight captures the target baseline and verifies source and targ
 are unchanged. Validation authority is issued separately after 06 MASTER acceptance.
 
 The public Java entry point accepts explicit trusted root, `MigrationInput`,
-`ControlledHarness.Config`, and a host-supplied `ResponsesClient`.
+`ControlledHarness.Config`, and a host-supplied `ProviderTransport` (or the
+compatible `ResponsesClient` overload).
 `ControlledPipeline.runJson(...)` blocks missing routing before provider access.
 `LiveLauncher` adds the fixed-fixture live CLI described below. `MigrationInput`
 reuses cached Jackson JSON parsing, preserves exact caller UTF-8 bytes and their
@@ -204,8 +248,8 @@ summary. No rollback or durable crash recovery is claimed. Live provider E2E
 remains unproven; this is not production readiness.
 
 Run `bash harness/test.sh` to compile the isolated Java harness and execute all
-eight groups: `HarnessTest`, `SourceContractTest`, `ArtifactContractTest`,
-`BrokerTest`, `RuntimeTest`, `ImplementationRuntimeTest`, `ValidationRuntimeTest`, and `LiveLauncherTest`. Tests use mocks and
+nine groups: `HarnessTest`, `SourceContractTest`, `ArtifactContractTest`,
+`BrokerTest`, `RuntimeTest`, `ImplementationRuntimeTest`, `ValidationRuntimeTest`, `LiveLauncherTest`, and `ProviderTransportTest`. Tests use mocks and
 temporary fixtures only; they do not resolve dependencies, execute project build
 scripts or call an API. The validation group launches the fixed local JDK worker.
 

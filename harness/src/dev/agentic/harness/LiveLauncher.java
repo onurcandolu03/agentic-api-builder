@@ -20,14 +20,14 @@ public final class LiveLauncher {
             }
             MigrationInput input = load(Path.of(args[2]));
             ControlledHarness.Config config = new ControlledHarness.Config(args[3], Integer.parseInt(args[4]));
-            HttpResponsesClient client = HttpResponsesClient.fromEnvironment();
+            ProviderTransport client = HostProviderConfiguration.directOpenAI().open();
             ControlledPipeline.Result result = run(Path.of(args[1]), input, config, client);
             // The pipeline screens retained evidence; no headers, credentials or raw exceptions are printed.
             System.out.println(Json.write(result.report()));
             exit = result.status().equals("SUCCESS") ? 0 : result.status().equals("BLOCKED") ? 2 : 1;
         } catch (Exception rejected) {
             // Argument, filesystem and transport exceptions may contain caller-controlled material.
-            System.err.println("LIVE_LAUNCH_REJECTED: check host arguments, fixture, JDK and OPENAI_API_KEY environment.");
+            System.err.println("LIVE_LAUNCH_REJECTED: check host arguments, fixture, JDK and host provider credentials.");
         }
         System.exit(exit);
     }
@@ -38,9 +38,13 @@ public final class LiveLauncher {
         }
     }
 
-    /** Package-private offline transport seam; the CLI always uses fromEnvironment(). */
+    /** Package-private offline transport seam; the CLI uses the frozen host provider profile. */
     static ControlledPipeline.Result run(Path trustedRoot, MigrationInput input, ControlledHarness.Config config,
                                          ResponsesClient client) throws Exception {
+        return run(trustedRoot, input, config, new ResponsesProtocolAdapter(client));
+    }
+    static ControlledPipeline.Result run(Path trustedRoot, MigrationInput input, ControlledHarness.Config config,
+                                         ProviderTransport client) throws Exception {
         return new ControlledPipeline(trustedRoot, input, config, client, LiveFixture.resolution(),
                 ValidationProfile.controlledJavaContractTest(LiveFixture.approvedSources())).run();
     }

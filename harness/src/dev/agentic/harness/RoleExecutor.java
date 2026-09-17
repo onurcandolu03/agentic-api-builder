@@ -4,7 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.function.Consumer;
 
-/** One host-selected invocation at a time, using the existing correlated Responses transport. */
+/** One host-selected invocation at a time, using host-correlated provider observations. */
 final class RoleExecutor {
     static final int MAX_TURNS = 96;
     record Invocation(String id, TrustedInputs.Role role, String predecessorInvocationId,

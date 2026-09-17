@@ -22,6 +22,14 @@ access is read-only; target writes require exact accepted-plan grants. Validatio
 requires a separate host-supplied trusted profile. The current profile supports
 a fixed Java contract-test fixture, not arbitrary project builds.
 
+The pipeline is provider-independent. The host-owned `ProviderTransport` boundary
+currently has one concrete adapter: direct OpenAI Responses, using the existing
+HTTP transport. `OPENAI_API_KEY` is specific to that adapter. Migration JSON cannot
+select providers, credentials, endpoints, executables or validation profiles.
+OpenCode/company integration is a future reviewed adapter; its E2E behavior is
+unproven. It must not own source/target authority, validation, MASTER acceptance
+or process execution.
+
 ## Repository
 
 - [MASTER.md](MASTER.md): orchestration and acceptance rules.
@@ -50,9 +58,9 @@ script fails if they are missing and never downloads dependencies.
 bash harness/test.sh
 ```
 
-The suite compiles the harness in a temporary directory and runs 468 checks:
+The suite compiles the harness in a temporary directory and includes the original 468 checks plus 25 provider-boundary checks:
 70 harness, 12 source contract, 145 artifact contract, 29 broker, 95 execution
-runtime, 56 implementation runtime, 53 validation runtime, and 8 live preparation. Provider responses
+runtime, 56 implementation runtime, 53 validation runtime, 8 live preparation, and 25 provider boundary. Provider responses
 are mocked; validation executes only the fixed local JDK worker with approved
 temporary fixture sources. No API key is required.
 

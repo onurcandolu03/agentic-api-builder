@@ -104,4 +104,52 @@ final class Json {
     static Map<String, Object> evidenceFingerprint(Object value) {
         return fingerprint("RUNTIME_DISCOVERY_EVIDENCE", bytes(value));
     }
+
+    /** Structural integrity for retained comparison values; distinct from exact JSON bytes. */
+    static Map<String, Object> structuralFingerprint(Object value) {
+        return fingerprint("STRUCTURAL_COMPARISON_INTEGRITY", structuralBytes(value));
+    }
+
+    private static byte[] structuralBytes(Object value) {
+        var out = new java.io.ByteArrayOutputStream();
+        encodeStructural(value, out);
+        return out.toByteArray();
+    }
+
+    private static void encodeStructural(Object value, java.io.ByteArrayOutputStream out) {
+        if (value == null) { out.write('N'); return; }
+        if (value instanceof Boolean bool) { out.write(bool ? 'T' : 'F'); return; }
+        if (value instanceof Integer number) { writeScalar(out, 'I', number.toString()); return; }
+        if (value instanceof Long number) { writeScalar(out, 'L', number.toString()); return; }
+        if (value instanceof String text) { writeScalar(out, 'S', text); return; }
+        if (value instanceof List<?> list) {
+            writeScalar(out, 'A', Integer.toString(list.size()));
+            list.forEach(item -> encodeStructural(item, out));
+            return;
+        }
+        if (value instanceof Map<?, ?> map) {
+            writeScalar(out, 'O', Integer.toString(map.size()));
+            map.keySet().stream().map(key -> (String) key).sorted().forEach(key -> {
+                writeScalar(out, 'K', key);
+                encodeStructural(map.get(key), out);
+            });
+            return;
+        }
+        throw new IllegalArgumentException("NON_CANONICAL_HOST_JSON");
+    }
+
+    private static void writeScalar(java.io.ByteArrayOutputStream out, int tag, String value) {
+        scalarString(value);
+        out.write(tag);
+        byte[] bytes;
+        try {
+            var encoded = StandardCharsets.UTF_8.newEncoder().encode(java.nio.CharBuffer.wrap(value));
+            bytes = new byte[encoded.remaining()];
+            encoded.get(bytes);
+        } catch (java.nio.charset.CharacterCodingException malformed) {
+            throw new IllegalArgumentException("INVALID_UNICODE");
+        }
+        out.writeBytes(java.nio.ByteBuffer.allocate(Integer.BYTES).putInt(bytes.length).array());
+        out.writeBytes(bytes);
+    }
 }

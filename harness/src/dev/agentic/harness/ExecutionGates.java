@@ -55,7 +55,7 @@ final class ExecutionGates {
         configurationFingerprint = Json.evidenceFingerprint(initialConfiguration);
         List<String> roles = Arrays.stream(TrustedInputs.Role.values()).map(r -> r.id).sorted().toList();
         Map<String,Object> profile = Json.object("profileId", PROFILE, "roles", roles,
-                "launchMechanism", "RESPONSES_SAME_CONTEXT_SEQUENTIAL", "controlMode", "FIXED_TRUSTED_CONTEXT",
+                "launchMechanism", "HOST_SAME_CONTEXT_SEQUENTIAL", "controlMode", "FIXED_TRUSTED_CONTEXT",
                 "controlDefinitionFingerprint", definitionFingerprint,
                 "effectiveConfigurationFingerprint", configurationFingerprint,
                 "initialObservationFingerprint", Json.evidenceFingerprint(observation));
@@ -137,17 +137,7 @@ final class ExecutionGates {
     private Map<String,Object> observe() {
         harness.verifyExecutionBoundary();
         Map<String,Object> full = harness.inspect();
-        Map<String,Object> request = full.get("activeRequestBody") == null ? null
-                : Json.parse((String) full.get("activeRequestBody"));
-        Map<String,Object> binding = null;
-        if (request != null) {
-            Map<String,Object> message = ExecutionPlan.map(ExecutionPlan.list(request.get("input")).getFirst());
-            Map<String,Object> content = ExecutionPlan.map(ExecutionPlan.list(message.get("content")).getFirst());
-            Map<String,Object> marker = Json.parse(ExecutionPlan.string(content.get("text")));
-            if (!"HOST_EXECUTION_TURN_V1".equals(marker.get("format")))
-                throw new IllegalArgumentException("EXECUTION_REQUEST_MARKER_REQUIRED");
-            binding = ExecutionPlan.map(marker.get("binding"));
-        }
+        Object binding = full.get("activeRequestBinding");
         Map<String,Object> result = Json.object("logicalContextId", full.get("logicalContextId"),
                 "state", full.get("state"), "activeRole", full.get("activeRole"), "responseId", full.get("responseId"),
                 "readbackCaptured", full.get("readbackCaptured"), "responseLineage", full.get("responseLineage"),

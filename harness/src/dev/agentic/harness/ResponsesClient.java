@@ -2,7 +2,7 @@ package dev.agentic.harness;
 
 import java.util.Map;
 
-/** Trusted host transport seam. A mock implementation is not runtime provider attestation. */
+/** Low-level Responses-specific transport seam. A mock implementation is not runtime provider attestation. */
 public interface ResponsesClient {
     String create(String exactRequestBody) throws Exception;
     String retrieve(String responseId) throws Exception;
