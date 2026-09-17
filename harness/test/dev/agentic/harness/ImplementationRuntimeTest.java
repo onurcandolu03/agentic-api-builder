@@ -264,13 +264,21 @@ public final class ImplementationRuntimeTest {
                 var item = map(entry);
                 check(item.keySet().equals(Set.of("itemId", "kind", "origin", "itemFingerprint")), "bounded execution inspection");
                 Map<String,Object> exact;
-                if (item.get("kind").equals("OUTPUT"))
-                    exact = map(((List<?>)Json.parse(mock.responses.get("resp_1")).get("output")).getFirst());
-                else {
+                // Independently reconstruct the provider-neutral item view from mock wire facts.
+                // Inspection hashes the full view, including its complete native comparison evidence.
+                if (item.get("kind").equals("OUTPUT")) {
+                    var nativeItem = map(((List<?>)Json.parse(mock.responses.get("resp_1")).get("output")).getFirst());
+                    exact = Json.object("id", nativeItem.get("id"), "kind", "OUTPUT", "text", null,
+                            "nativeEvidence", nativeItem);
+                    check(item.get("origin").equals("resp_1"), "output origin retained");
+                } else {
+                    check(item.get("kind").equals("USER_INPUT"), "expected user input kind");
                     var message = map(((List<?>)mock.requests.getFirst().get("input")).getFirst());
-                    exact = Json.object("id", "input_1", "type", message.get("type"), "role", message.get("role"),
-                            "content", message.get("content"), "status", "completed");
+                    exact = Json.object("id", "input_1", "kind", "USER_INPUT", "text", null,
+                            "nativeEvidence", Json.object("type", message.get("type"), "role", message.get("role"),
+                                    "content", message.get("content")));
                 }
+                check(exact.get("id").equals(item.get("itemId")), "exact provider item identity");
                 check(Json.evidenceFingerprint(exact).equals(item.get("itemFingerprint")), "exact provider item fingerprint");
             }
         } finally { harness.close(); }
