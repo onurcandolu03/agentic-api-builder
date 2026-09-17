@@ -89,6 +89,11 @@ final class RepositoryFiles {
             throw new IOException("GIT_CONTENT_OBSERVATION_UNSUPPORTED");
     }
 
+    Path root() { return root; }
+    void requireRoot(Path supplied) throws IOException {
+        if (!root.equals(supplied)) throw new IOException("VALIDATION_CWD_MISMATCH");
+        verify();
+    }
     void verify() throws IOException {
         recheck(rootChain);
         if (!root.toRealPath().equals(root) || !identity(rootChain.getLast().attributes()).equals(rootIdentity))

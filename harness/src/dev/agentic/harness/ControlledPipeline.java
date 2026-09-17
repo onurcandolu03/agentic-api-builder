@@ -732,7 +732,7 @@ public final class ControlledPipeline {
         if (sourceBaseline == null || targetCurrent == null) {
             finalEffects = Json.object("observation", "NOT_REACHED", "mutationAuthorityIssued", mutationAuthorityIssued); return;
         }
-        if (validation != null && validation.started()) {
+        if (validation != null && validation.hasEffects()) {
             validation.observe();
             if (validation.status().equals("FAILED")) specialistFailure = new Halt("FAILED", validation.code());
             else if (status.equals("SUCCESS") && !validation.status().equals("SUCCESS")) {
@@ -742,15 +742,15 @@ public final class ControlledPipeline {
         RepositoryFiles.Snapshot observedSource = null, observedTarget = null;
         try { observedSource = source.observeTerminatedSnapshot(Set.of()); }
         catch (Exception unavailable) { /* Only this observation is unknown. */ }
-        try { observedTarget = validation != null && validation.started() ? validation.targetSnapshot() : target.observeTerminatedSnapshot(Set.of()); }
+        try { observedTarget = validation != null && validation.hasEffects() ? validation.targetSnapshot() : target.observeTerminatedSnapshot(Set.of()); }
         catch (Exception unavailable) { /* Keep an independently obtained source observation. */ }
         Boolean sourceEqual = observedSource == null ? null : sourceBaseline.equals(observedSource);
-        if (validation != null && validation.started()) {
+        if (validation != null && validation.hasEffects()) {
             var validationEffects = map(validation.facts().get("effects"));
             if (!Boolean.TRUE.equals(validationEffects.get("sourceUnchanged"))) sourceEqual = (Boolean)validationEffects.get("sourceUnchanged");
         }
         Boolean targetEqual = null;
-        try { targetCurrent = expectedTarget(); targetEqual = observedTarget == null ? null : validation != null && validation.started()
+        try { targetCurrent = expectedTarget(); targetEqual = observedTarget == null ? null : validation != null && validation.hasEffects()
                 ? validation.terminalTargetMatches(observedTarget) : Boolean.valueOf(targetCurrent.equals(observedTarget)); }
         catch (RuntimeException unavailable) {
             orchestrationFailures.add(Json.object("stage", "TERMINAL_EFFECT_ACCOUNTING", "code", "EFFECT_ACCOUNTING_UNAVAILABLE"));

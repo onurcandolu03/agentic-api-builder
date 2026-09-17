@@ -19,8 +19,10 @@ MASTER
 
 The controlled runtime and its security boundaries are authoritative. Source
 access is read-only; target writes require exact accepted-plan grants. Validation
-requires a separate host-supplied trusted profile. The current profile supports
-a fixed Java contract-test fixture, not arbitrary project builds.
+requires a separate host-supplied trusted profile. Profiles support the fixed Java
+contract-test fixture and a host-controlled offline Maven `test` boundary for
+Spring Boot targets. See [Maven validation](harness/README.md#host-controlled-maven--spring-boot-validation)
+for host provisioning and limits.
 
 The pipeline is provider-independent. The host-owned `ProviderTransport` boundary
 currently has one concrete adapter: direct OpenAI Responses, using the existing
@@ -63,6 +65,8 @@ bash harness/test.sh
 For only offline config/YAML and launcher input guards, use
 `bash harness/test.sh migration-input`. This does not run the canonical suite,
 provider scenarios or the validation worker.
+For only process-boundary checks and controlled-Java compatibility, use
+`bash harness/test.sh validation`; no provider/network calls are needed.
 
 The suite compiles the harness in a temporary directory and includes migration
 config checks alongside the original 468 checks plus 25 provider-boundary checks:
@@ -81,6 +85,6 @@ The launcher accepts `.json`, `.yaml`, and `.yml`. YAML is data-only and normali
 through the same `MigrationInput` semantics as JSON. Provider, credentials,
 endpoints, static authority, validation, filesystem and process authority remain
 host-owned. See [YAML rules](harness/README.md#migration-config-formats).
-General project validation,
+Unrestricted project builds,
 execution-profile Git-state support, durable recovery, and resume remain outside
 the supported runtime. This is not a production-readiness claim.

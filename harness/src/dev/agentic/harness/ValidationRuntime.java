@@ -13,7 +13,7 @@ final class ValidationRuntime {
     private final RepositoryFiles.Snapshot sourceBefore, targetBefore;
     private final Map<String,Object> authority;
     private final Map<String,Object> sourceModes, targetModes;
-    private boolean used;
+    private boolean used, preparationAttempted;
     private Map<String,Object> execution = Json.object("started", false, "completed", false);
     private Map<String,Object> effects = Json.object("classification", "NOT_OBSERVED");
     private RepositoryFiles.Snapshot acceptedAfter;
@@ -24,7 +24,12 @@ final class ValidationRuntime {
                       String runId, RoleExecutor.Invocation invocation, ArtifactStore artifacts,
                       RepositoryFiles sourceObserver, RepositoryFiles targetObserver,
                       Map<String,Object> originalSourceModes, Map<String,Object> acceptedTargetModes) throws Exception {
-        this.profile = profile; this.root = targetRoot; this.sourceBefore = sourceBefore; this.targetBefore = targetBefore;
+        this.profile = profile; this.root = targetRoot;
+        targetObserver.requireRoot(targetRoot);
+        if (sourceBefore.rootFilesystemIdentity().equals(targetBefore.rootFilesystemIdentity()))
+            throw new IllegalStateException("VALIDATION_SOURCE_TARGET_OVERLAP");
+        profile.verifyRoots(sourceObserver.root(), targetRoot);
+        this.sourceBefore = sourceBefore; this.targetBefore = targetBefore;
         if (invocation.role() != TrustedInputs.Role.VALIDATION) throw new IllegalStateException("VALIDATION_ROLE_DENIED");
         if (!runId.equals(artifacts.required("MIGRATION_PLAN").binding().get("runId")))
             throw new IllegalStateException("VALIDATION_RUN_MISMATCH");
@@ -47,7 +52,8 @@ final class ValidationRuntime {
                 "migrationPlanFingerprint", artifacts.required("MIGRATION_PLAN").fingerprint(),
                 "implementationResults", predecessors, "predecessorAcceptance", predecessors.getLast(),
                 "targetRootIdentity", targetBefore.rootFilesystemIdentity(), "workingRoot", root.toString(),
-                "profileId", ValidationProfile.ID, "trustedProfile", profile.view(),
+                "profileId", profile.id(), "trustedProfile", profile.view(),
+                "launchFingerprint", Json.evidenceFingerprint(profile.command(root)),
                 "beforeSourceModes", sourceModes, "beforeTargetModes", targetModes,
                 "beforeSourceFingerprint", Json.evidenceFingerprint(sourceBefore.entries()),
                 "beforeTargetFingerprint", Json.evidenceFingerprint(targetBefore.entries()));
@@ -57,6 +63,7 @@ final class ValidationRuntime {
     Map<String,Object> authority() { return authority; }
     String status() { return status; }
     String code() { return code; }
+    boolean hasEffects() { return preparationAttempted || started(); }
     boolean started() { return Boolean.TRUE.equals(execution.get("started")); }
     Map<String,Object> facts() { return Json.object("authority", authority, "execution", execution, "effects", effects, "status", status, "code", code); }
 
@@ -94,68 +101,151 @@ final class ValidationRuntime {
         }
         used = true; precheck();
         Process process = null;
+        ProcessTree tree = null;
         Capture out = null, err = null;
-        boolean timedOut = false, interrupted = false, cleanupUnavailable = false; Integer exit = null;
+        boolean timedOut = false, interrupted = false, cleanupUnavailable = false;
+        Integer exit = null;
         try {
-            ProcessBuilder builder = new ProcessBuilder(profile.command());
+            preparationAttempted = true;
+            profile.prepare(root);
+            source.verify(); target.requireRoot(root);
+            ProcessBuilder builder = new ProcessBuilder(profile.command(root));
             builder.directory(root.toFile()); builder.environment().clear();
             process = builder.start();
-            // Preserve launch before any stream, wait, observation or evidence operation can fail.
-            execution = Json.object("started", true, "completed", false, "profileId", ValidationProfile.ID);
+            execution = Json.object("started", true, "completed", false, "profileId", profile.id());
+            tree = new ProcessTree(process);
+            tree.observeTree();
+            if (tree.failure != null) throw new IllegalStateException(tree.failure);
             process.getOutputStream().close();
             out = new Capture(process.getInputStream()); err = new Capture(process.getErrorStream());
             out.start(); err.start();
-            timedOut = !process.waitFor(ValidationProfile.TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            if (timedOut) kill(process);
-            if (process.isAlive()) { code = "VALIDATION_PROCESS_TERMINATION_UNAVAILABLE"; }
-            else exit = process.exitValue();
-            out.finish(); err.finish();
-            execution = Json.object("started", true, "completed", !process.isAlive(), "profileId", ValidationProfile.ID,
-                    "exitCode", exit, "timedOut", timedOut, "stdout", out.view("VALIDATION_STDOUT"), "stderr", err.view("VALIDATION_STDERR"));
+            timedOut = !tree.await(profile.timeoutSeconds());
+            if (!process.isAlive()) exit = process.exitValue();
             status = "FAILED";
             code = timedOut ? "VALIDATION_TIMEOUT" : exit == null ? "VALIDATION_PROCESS_TERMINATION_UNAVAILABLE"
-                    : exit != 0 ? "VALIDATION_TESTS_FAILED" : !out.complete || !err.complete ? "VALIDATION_STREAM_CAPTURE_FAILED" : "VALIDATION_PASSED";
+                    : exit != 0 ? "VALIDATION_TESTS_FAILED" : "VALIDATION_PASSED";
             if (code.equals("VALIDATION_PASSED")) status = "SUCCESS";
         } catch (Exception unavailable) {
             interrupted = unavailable instanceof InterruptedException;
             status = started() ? "FAILED" : "BLOCKED";
-            code = timedOut ? "VALIDATION_TIMEOUT" : exit != null && exit != 0 ? "VALIDATION_TESTS_FAILED"
+            code = tree != null && tree.failure != null ? tree.failure
                     : started() ? "VALIDATION_EXECUTION_INTERRUPTED" : "VALIDATION_LAUNCH_UNAVAILABLE";
         } finally {
-            if (process != null && process.isAlive()) {
-                try { kill(process); }
-                catch (InterruptedException stopped) { interrupted = true; cleanupUnavailable = true; }
-                catch (RuntimeException unavailable) { cleanupUnavailable = true; }
-                if (cleanupUnavailable && !status.equals("FAILED")) {
-                    status = "FAILED"; code = "VALIDATION_PROCESS_TERMINATION_UNAVAILABLE";
+            // Every launched process terminalizes its retained tree, even when the parent already exited.
+            if (tree != null) {
+                tree.cleanup(); interrupted |= tree.interrupted;
+                cleanupUnavailable = tree.failure != null;
+                if (cleanupUnavailable && (status.equals("SUCCESS") || code.equals("VALIDATION_EXECUTION_INTERRUPTED"))) {
+                    status = "FAILED"; code = tree.failure;
                 }
             }
-            // Even interrupted capture/cleanup retains all independently known launch/exit facts.
-            if (process != null && !execution.containsKey("exitCode")) {
-                execution = Json.object("started", true, "completed", !process.isAlive(), "profileId", ValidationProfile.ID,
+            for (Capture capture : new Capture[] {out, err}) if (capture != null) {
+                try { capture.finish(tree != null && tree.failure == null && process != null && !process.isAlive()); }
+                catch (InterruptedException stopped) { interrupted = true; capture.closeAsync(); }
+            }
+            if (interrupted && status.equals("SUCCESS")) { status = "FAILED"; code = "VALIDATION_EXECUTION_INTERRUPTED"; }
+            if (status.equals("SUCCESS") && (out == null || err == null || !out.complete || !err.complete)) {
+                status = "FAILED"; code = "VALIDATION_STREAM_CAPTURE_FAILED";
+            }
+            if (process != null) {
+                execution = Json.object("started", true, "completed", !process.isAlive(), "profileId", profile.id(),
                         "exitCode", process.isAlive() ? null : process.exitValue(), "timedOut", timedOut,
                         "stdout", out == null ? null : out.view("VALIDATION_STDOUT"),
                         "stderr", err == null ? null : err.view("VALIDATION_STDERR"));
             }
             var retainedExecution = new LinkedHashMap<>(execution);
             retainedExecution.put("cleanupUnavailable", cleanupUnavailable);
+            retainedExecution.put("processTree", tree == null ? null : tree.view());
+            retainedExecution.put("preparationAttempted", preparationAttempted);
             execution = ExecutionPlan.map(Json.object("execution", retainedExecution).get("execution"));
             try { observe(); }
             finally { if (interrupted) Thread.currentThread().interrupt(); }
         }
     }
-    private static void kill(Process p) throws InterruptedException {
-        List<ProcessHandle> descendants = List.of();
-        RuntimeException descendantFailure = null;
-        try {
-            descendants = p.descendants().toList();
-            descendants.forEach(ProcessHandle::destroyForcibly);
-        } catch (RuntimeException unavailable) { descendantFailure = unavailable; }
-        finally { p.destroyForcibly(); }
-        // Parent exit is independently observed even if descendant enumeration is unavailable.
-        p.waitFor(1, TimeUnit.SECONDS);
-        descendants.forEach(ProcessHandle::destroyForcibly);
-        if (descendantFailure != null) throw descendantFailure;
+
+    /** Bounded observation/cleanup, not OS confinement. Handles survive parent exit/reparenting.
+     * Package access permits deterministic process lifecycle regression tests without a launch-policy seam. */
+    static final class ProcessTree {
+        private static final int MAX_DESCENDANTS = 128, POLL_MILLIS = 25;
+        private final Process parent;
+        private final Set<ProcessHandle> retained = new LinkedHashSet<>();
+        private String failure;
+        private boolean interrupted;
+        private int observations, cleanupPasses;
+        ProcessTree(Process parent) { this.parent = parent; }
+        private void fail(String reason) { if (failure == null) failure = reason; }
+        private void discover(ProcessHandle ancestor) {
+            try (var descendants = ancestor.descendants()) {
+                var iterator = descendants.limit(MAX_DESCENDANTS + 1L).iterator();
+                int count = 0;
+                while (iterator.hasNext()) {
+                    ProcessHandle child = iterator.next();
+                    if (++count > MAX_DESCENDANTS || (!retained.contains(child) && retained.size() == MAX_DESCENDANTS)) {
+                        fail("VALIDATION_DESCENDANT_LIMIT"); break;
+                    }
+                    retained.add(child);
+                }
+            } catch (RuntimeException unavailable) { fail("VALIDATION_DESCENDANT_OBSERVATION_UNAVAILABLE"); }
+        }
+        private void observeTree() {
+            observations++;
+            // Include retained descendants as roots: they may have been reparented already.
+            var previous = List.copyOf(retained);
+            if (parent.isAlive()) discover(parent.toHandle());
+            for (ProcessHandle child : previous) if (child.isAlive()) discover(child);
+        }
+        boolean await(int seconds) throws InterruptedException {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
+            do {
+                observeTree();
+                if (failure != null) throw new IllegalStateException(failure);
+                if (!parent.isAlive()) return true;
+                long left = deadline - System.nanoTime();
+                if (left <= 0) return false;
+                parent.waitFor(Math.min(left, TimeUnit.MILLISECONDS.toNanos(POLL_MILLIS)), TimeUnit.NANOSECONDS);
+            } while (true);
+        }
+        private void terminateRetained() {
+            for (ProcessHandle child : retained) try {
+                if (child.isAlive()) child.destroyForcibly();
+            } catch (RuntimeException unavailable) { fail("VALIDATION_PROCESS_TERMINATION_UNAVAILABLE"); }
+        }
+        private void terminateParent() {
+            try { if (parent.isAlive()) parent.destroyForcibly(); }
+            catch (RuntimeException unavailable) { fail("VALIDATION_PROCESS_TERMINATION_UNAVAILABLE"); }
+        }
+        private void pause() {
+            try { Thread.sleep(POLL_MILLIS); }
+            catch (InterruptedException stopped) { interrupted = true; }
+        }
+        void cleanup() {
+            interrupted |= Thread.interrupted();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            // Leave a live parent briefly available to reap children and expose replacement children.
+            // Fixed pass counts plus a shared deadline bound repeated discovery and termination.
+            try {
+                for (int pass = 0; pass < 20 && System.nanoTime() < deadline; pass++) {
+                    cleanupPasses++; observeTree(); terminateRetained();
+                    if (!parent.isAlive() && retained.stream().noneMatch(ProcessHandle::isAlive)) break;
+                    pause();
+                }
+            } catch (RuntimeException unavailable) { fail("VALIDATION_PROCESS_TERMINATION_UNAVAILABLE"); }
+            finally { terminateParent(); }
+            try {
+                for (int pass = 0; pass < 60 && System.nanoTime() < deadline; pass++) {
+                    cleanupPasses++; observeTree(); terminateRetained(); terminateParent();
+                    if (!parent.isAlive() && retained.stream().noneMatch(ProcessHandle::isAlive)) break;
+                    pause();
+                }
+                terminateRetained(); terminateParent();
+                if (parent.isAlive() || retained.stream().anyMatch(ProcessHandle::isAlive))
+                    fail("VALIDATION_PROCESS_TERMINATION_UNAVAILABLE");
+            } catch (RuntimeException unavailable) { fail("VALIDATION_PROCESS_TERMINATION_UNAVAILABLE"); }
+        }
+        Map<String,Object> view() {
+            return Json.object("observedDescendants", retained.size(), "discoveryPasses", observations,
+                    "cleanupPasses", cleanupPasses, "cleanupFailure", failure);
+        }
     }
     /** Full bounded binary-capable observation: only output content bypasses text decoding. Links still reject. */
     void observe() {
@@ -252,30 +342,53 @@ final class ValidationRuntime {
         return Json.object("resultVersion", 1, "role", authority.get("role"), "invocationId", authority.get("invocationId"),
                 "migrationPlanFingerprint", authority.get("migrationPlanFingerprint"), "implementationResults", authority.get("implementationResults"),
                 "predecessorAcceptance", authority.get("predecessorAcceptance"), "authorityId", authority.get("authorityId"),
-                "profileId", ValidationProfile.ID, "hostExecutionEvidenceReference", Json.evidenceFingerprint(execution),
+                "profileId", profile.id(), "hostExecutionEvidenceReference", Json.evidenceFingerprint(execution),
                 "exitCode", execution.get("exitCode"), "timedOut", execution.get("timedOut"),
                 "repositoryEffects", effects, "validationStatus", status, "failures", status.equals("SUCCESS") ? List.of() : List.of(code));
     }
     void validateResult(Map<String,Object> result) {
         if (!started() || !Json.parse(Json.write(resultContract())).equals(result)) throw new IllegalArgumentException("VALIDATION_RESULT_HOST_EVIDENCE_MISMATCH");
     }
-    private static final class Capture extends Thread {
+    static final class Capture extends Thread {
         private final InputStream input;
         private final ByteArrayOutputStream retained = new ByteArrayOutputStream();
         private long observed;
-        private volatile boolean complete;
+        private volatile boolean complete, stop, readFailed, drained;
         Capture(InputStream input) { this.input = input; setDaemon(true); }
         @Override public void run() {
             byte[] buffer = new byte[1024];
-            try { int count; while ((count = input.read(buffer)) != -1) synchronized (this) {
-                observed += count;
-                retained.write(buffer, 0, Math.min(count, ValidationProfile.STREAM_BYTES - retained.size()));
-            } complete = true; } catch (IOException ignored) { /* Evidence explicitly records incomplete capture. */ }
+            try {
+                while (true) {
+                    int available = input.available();
+                    if (available > 0) {
+                        int count = input.read(buffer, 0, Math.min(buffer.length, available));
+                        if (count < 0) { drained = true; break; }
+                        if (count == 0) { Thread.sleep(10); continue; }
+                        synchronized (this) {
+                            observed += count;
+                            retained.write(buffer, 0, Math.min(count, ValidationProfile.STREAM_BYTES - retained.size()));
+                        }
+                    } else if (stop) { drained = true; break; }
+                    else Thread.sleep(10);
+                }
+            } catch (IOException unavailable) { readFailed = true; }
+            catch (InterruptedException stopped) { Thread.currentThread().interrupt(); }
         }
-        void finish() throws Exception { join(1000); if (isAlive()) { input.close(); join(1000); } }
+        void finish(boolean treeClosed) throws InterruptedException {
+            stop = true;
+            join(1000);
+            if (isAlive()) { interrupt(); join(1000); }
+            complete = treeClosed && drained && !readFailed && !isAlive();
+            closeAsync();
+        }
+        void closeAsync() {
+            // Closing a process pipe can wait for a reader lock; never wait here.
+            Thread closer = new Thread(() -> { try { input.close(); } catch (IOException ignored) { } });
+            closer.setDaemon(true); closer.start();
+        }
         synchronized Map<String,Object> view(String role) {
             return Json.object("retainedBytes", retained.size(), "observedBytes", observed, "truncated", observed > retained.size(),
-                    "complete", complete, "retainedFingerprint", Json.fingerprint(role, retained.toByteArray()), "excerpts", List.of());
+                    "complete", complete, "classification", "UNTRUSTED_VALIDATION_OUTPUT", "retainedFingerprint", Json.fingerprint(role, retained.toByteArray()), "excerpts", List.of());
         }
     }
 }

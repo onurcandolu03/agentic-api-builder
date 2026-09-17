@@ -203,8 +203,8 @@ model output nor caller routing JSON can select this profile or its approved byt
 This is a fixed fixture profile, not a Maven runner or general Java test discovery.
 
 The validation command, exact argument vector, executable/worker fingerprints,
-working root, empty environment, five-second timeout and output scopes are
-host-owned. There is no arbitrary shell, command/argument/cwd/env input, stdin,
+working root, cleared child environment (subject to OS-added metadata),
+five-second timeout and output scopes are host-owned. There is no arbitrary shell, command/argument/cwd/env input, stdin,
 network tool, Git operation or 07 repository mutation tool. Compiler annotation
 processing and implicit source discovery are disabled. The model's sole request
 is `RUN_VALIDATION` with its invocation, role, operation ID and authority ID.
@@ -229,15 +229,21 @@ content per repository; oversized or unsafe observations never support PASS.
 These remain point-in-time checks, not OS sandboxing or protection against transient
 changes restored between observations. Executed fixture code must be host-trusted.
 
-Each process stream retains at most 8 KiB (16 KiB total), drains excess output,
-and reports retained-byte fingerprints, observed counts, truncation and completion.
+Each process stream retains at most 8 KiB (16 KiB total), drains excess output
+while the process is observed, and ends its reader within a bounded terminal wait.
+It reports retained-byte fingerprints, observed counts, truncation and completion.
 No raw build log excerpts enter artifacts. Retained validation facts have a 256 KiB
 cap; oversized effect sets retain a fingerprint, count and bounded examples, mark
 full evidence unavailable, and cannot pass. Evidence bounds never downgrade a known
 FAILED process/effect outcome to BLOCKED. Terminal observations preserve previously
-observed unauthorized effects even if a later callback restores the files. Timeout kills the process and observed
-descendants. Nonzero exit and timeout remain FAILED; inability to safely launch is
-BLOCKED. Unknown/incomplete execution or repository observations cannot pass.
+observed unauthorized effects even if a later callback restores the files.
+Terminal cleanup runs after success, nonzero exit, timeout and exceptional
+execution. It repeatedly discovers descendants while the parent is alive, retains
+observed handles after parent exit, and terminates survivors within a bounded
+cleanup window. Failure to enumerate or terminate is a sanitized FAILED outcome.
+This is lifecycle cleanup for observed descendants, not OS process confinement.
+Nonzero exit and timeout remain FAILED; inability to safely launch is BLOCKED.
+Unknown or incomplete execution and repository observations cannot pass.
 
 The strict `VALIDATION_RESULT` binds the authority, invocation, predecessor lineage,
 host execution reference, exit/timeout, exact observed repository effects, status
@@ -246,6 +252,72 @@ independent evidence, and its acceptance is required for final SUCCESS. Host
 execution facts and effects survive later journal/report rejection in the terminal
 summary. No rollback or durable crash recovery is claimed. Live provider E2E
 remains unproven; this is not production readiness.
+
+### Host-controlled Maven / Spring Boot validation
+
+Trusted embedding code can pass `ValidationProfile.mavenTest(hostMavenHome,
+hostReadOnlyRepository)` to the same six-argument `ControlledPipeline` constructor.
+The existing `LiveLauncher` continues to select its controlled-Java fixture profile;
+there is no Maven command configuration in migration JSON/YAML or launcher input.
+
+`HOST_MAVEN_TEST` runs the installed host JDK directly with an explicit
+`ProcessBuilder` argv: fixed JVM flags, a host-generated Classworlds configuration,
+one fingerprinted bootstrap jar from the reviewed Maven 3 installation, and the
+fixed Maven arguments `--batch-mode --offline --no-transfer-progress
+--strict-checksums`, isolated user/global settings, the host cache property,
+`-Dstyle.color=never`, and `test`. Use a reviewed Maven 3.9.x distribution; Maven 4
+and arbitrary distributions are not established by these tests. There is no shell,
+PATH lookup, executable fallback, repository wrapper execution, or arbitrary-command
+API. Host installation/cache paths must be canonical, disjoint from source and
+target, and free of symlinks/hardlinks. Their bounded content/identity fingerprints
+are checked again before launch; the exact argv fingerprint is bound to the authority.
+
+The cwd is exactly the registered target root. Maven's multi-module root is set
+explicitly to that root. Any `.mvn` directory in the observed target (including
+nested paths) blocks launch: Maven core itself reads `maven.config` and
+`extensions.xml`, even when shell wrappers are bypassed. Repository `jvm.config`
+and `mvnw` are never executed or interpreted as launch policy. These checks use
+the existing point-in-time repository boundary; they do not prevent concurrent
+filesystem races or hostile build code from changing files after launch.
+
+The child environment is cleared. Provider keys, tokens, credential variables,
+`JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS`, `_JAVA_OPTIONS`, `MAVEN_OPTS`, `MAVEN_ARGS`,
+`CLASSPATH`, `HOME` and shell startup variables are not inherited. OS runtime metadata
+(such as macOS `__CF_USER_TEXT_ENCODING`) may still appear. `user.home`, Java's temp
+directory, empty Maven user/global settings and launcher configuration are created
+under the initially absent `target/.harness-maven` output scope. Host user settings,
+credentials and toolchains are not loaded. The pre-provisioned offline cache must
+have no write permission bits; this profile neither populates it nor downloads
+missing dependencies. Provision only the artifacts needed by the reviewed build.
+Installation/cache inspection is bounded to 8,192 entries, 64 MiB/file and 1 GiB/tree.
+
+Maven gets a fixed 60-second timeout and the same 8 KiB-per-stream capture,
+fingerprint-only `UNTRUSTED_VALIDATION_OUTPUT`, effect checks and FAILED/BLOCKED
+rules as the Java profile. Timeout kills the process and observed descendants.
+Successful exit supplies structured host evidence; 07's exact result and separate
+MASTER acceptance are still required. No raw Maven log enters prompts or diagnostics.
+Only root `target/**` is an accepted output scope; existing snapshot limits still
+apply. Multi-module output directories and larger builds may therefore fail closed.
+
+This supports the invocation boundary for a conventional single-module Spring Boot
+Maven target with its dependencies already provisioned. POM lifecycle/plugin/test
+semantics still execute build code: the host must review that code or supply external
+OS isolation. Offline Maven resolution is not an OS network sandbox, and repository
+observations are not confinement of hostile plugins or forked test processes. This
+milestone adds no filesystem grant outside existing scopes and makes no production
+readiness or full Spring Boot application E2E claim. OpenCode/company-provider
+integration remains a separate adapter concern; real company-provider E2E is unproven.
+
+Run only `bash harness/test.sh validation` for this boundary's focused offline tests.
+They use a fake host Maven bootstrap, actual Java children, direct runtime fixtures,
+JSON/YAML/YML through the mocked pipeline, a mocked MASTER rejection scenario,
+deterministic process-tree fixtures and controlled-Java compatibility.
+They need cached harness dependencies, no provider credentials or dependency downloads.
+The descendant cleanup check needs OS permission to enumerate processes; a sandbox
+that denies that capability cannot establish descendant cleanup. Runtime evidence
+records cleanup unavailability while preserving the FAILED timeout result.
+A separate local Maven 3.9.16 bootstrap check also completed the fixed offline
+`test` goal on a dependency-free POM; it does not establish application test coverage.
 
 Run `bash harness/test.sh` to compile the isolated Java harness and execute all
 ten groups: `HarnessTest`, `SourceContractTest`, `ArtifactContractTest`,

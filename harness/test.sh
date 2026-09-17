@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Compile/run the isolated harness and fixed validation fixtures; never download jars or invoke project scripts.
 harness_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-if [[ $# -gt 1 || ( $# -eq 1 && "$1" != "migration-input" ) ]]; then
-  printf 'Usage: test.sh [migration-input]\n' >&2
+if [[ $# -gt 2 || ( $# -ge 1 && "$1" != "migration-input" && "$1" != "validation" ) || ( $# -eq 2 && "$1" != "validation" ) ]]; then
+  printf 'Usage: test.sh [migration-input|validation [comma-separated-maven-cases]]\n' >&2
   exit 2
 fi
 if [[ -n "${HARNESS_JACKSON_CLASSPATH:-}" ]]; then
@@ -27,6 +27,18 @@ mkdir "$harness_temp/classes"
 javac --release 21 -cp "$harness_classpath" -d "$harness_temp/classes" \
   "$harness_root"/src/dev/agentic/harness/*.java \
   "$harness_root"/test/dev/agentic/harness/*.java
+if [[ "${1:-}" == "validation" ]]; then
+  java -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.ValidationProcessLifecycleTest
+  if [[ $# -eq 2 ]]; then
+    java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.MavenValidationTest "$harness_temp" "$harness_root/.." "$2"
+  else
+    java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.MavenValidationTest "$harness_temp" "$harness_root/.."
+  fi
+  if [[ $# -eq 1 ]]; then
+    java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.ValidationRuntimeTest "$harness_temp" "$harness_root/.." success
+  fi
+  exit 0
+fi
 if [[ "${1:-}" == "migration-input" ]]; then
   java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.MigrationConfigLoaderTest "$harness_temp"
   java -Djava.io.tmpdir="$harness_temp_parent" -cp "$harness_temp/classes:$harness_classpath" dev.agentic.harness.LiveLauncherTest "$harness_temp" "$harness_root/.." input-guards
