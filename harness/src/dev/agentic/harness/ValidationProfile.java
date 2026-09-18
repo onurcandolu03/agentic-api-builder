@@ -14,6 +14,8 @@ public final class ValidationProfile {
     private final List<String> command;
     private final Path executable, runner;
     private final Map<String,Object> executableFingerprint, runnerFingerprint;
+    private Map<String,Object> operationPlanFingerprint;
+    private Map<String,List<String>> operationTests;
 
     private ValidationProfile(Map<String,String> approvedSources) throws Exception {
         if (!approvedSources.keySet().equals(Set.copyOf(SOURCES)))
@@ -44,11 +46,39 @@ public final class ValidationProfile {
     public static ValidationProfile mavenTest(Path hostMavenHome, Path hostReadOnlyRepository) throws Exception {
         return new ValidationProfile(hostMavenHome, hostReadOnlyRepository);
     }
+    /** Separate host authorization: exact accepted plan and independently reviewed test identities.
+     * Keys are TEST obligation IDs; values are Surefire classname#name identities. Never caller/model data. */
+    public static ValidationProfile mavenOperationTest(Path home, Path cache, Map<String,Object> planFingerprint,
+                                                     Map<String,List<String>> requiredTests) throws Exception {
+        SourceBroker.fingerprint(planFingerprint, "OPERATION_PLAN");
+        if (requiredTests.isEmpty()) throw new IllegalArgumentException("OPERATION_VALIDATION_TESTS_REQUIRED");
+        var tests = new TreeMap<String,List<String>>();
+        requiredTests.forEach((id, names) -> {
+            if (!id.matches("TEST-[0-9]{3}") || names.isEmpty() || new HashSet<>(names).size() != names.size()
+                    || names.stream().anyMatch(n -> !n.matches("[A-Za-z_$][A-Za-z0-9_.$]*#[A-Za-z_$][A-Za-z0-9_$]*")))
+                throw new IllegalArgumentException("OPERATION_VALIDATION_TEST_IDENTITY");
+            tests.put(id, List.copyOf(names));
+        });
+        var profile = new ValidationProfile(home, cache);
+        profile.operationPlanFingerprint = MigrationInput.immutable(planFingerprint);
+        profile.operationTests = Collections.unmodifiableMap(tests);
+        return profile;
+    }
+    Map<String,List<String>> operationTests() { return operationTests; }
+    Map<String,Object> operationPolicy() {
+        if (operationTests == null) throw new IllegalStateException("NEW_OPERATION_VALIDATION_AUTHORITY_REQUIRED");
+        return Json.object("policyVersion", 1, "workflow", "NEW_OPERATION", "operationPlanFingerprint", operationPlanFingerprint,
+                "requiredTests", operationTests, "reportPolicy", "FRESH_SUREFIRE_EXACT_TESTS_V1", "mavenProfile", view());
+    }
     String id() { return maven == null ? ID : "HOST_MAVEN_TEST"; }
     int timeoutSeconds() { return maven == null ? TIMEOUT_SECONDS : 60; }
     List<String> command(Path root) { return maven == null ? command : maven.command(executable, root); }
     void verifyRoots(Path source, Path target) throws Exception {
         if (maven != null) maven.verifyRoots(source, target);
+    }
+    void verifyTargetRoot(Path target) throws Exception {
+        if (maven == null || operationTests == null) throw new IllegalStateException("NEW_OPERATION_VALIDATION_AUTHORITY_REQUIRED");
+        maven.verifyTargetRoot(target);
     }
     void prepare(Path root) throws Exception { if (maven != null) maven.prepare(root); }
     List<String> command() { return command; }

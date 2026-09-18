@@ -45,6 +45,123 @@ readback and context observations is unsupported. Real provider E2E remains unpr
 
 ## Current execution runtime
 
+The host-supplied config now selects `workflow: MIGRATION` or
+`workflow: NEW_OPERATION`. Only this top-level field selects the workflow;
+prompts and model output cannot change it. Missing `workflow` defaults to
+MIGRATION because existing flat and `migration.settings` configs omit it.
+Their source root, operation locator, path, overlap, and secret checks remain
+mandatory. Unsupported values return structured BLOCKED `UNSUPPORTED_WORKFLOW`;
+a selector in a migration/settings envelope returns `WORKFLOW_ROUTING_AMBIGUOUS`.
+Malformed data retains FAILED validation behavior. JSON and YAML share these
+rules; unsupported CLI workflow selections return screened structured JSON
+before provider creation. Other CLI input failures retain the generic diagnostic.
+
+NEW_OPERATION currently runs **00R Requirement Analysis → 01 Target Analysis →
+02R Operation Planning → 03 → 04 → 05 → 06 → 07**, with separate host implementation
+and validation authority. Host-controlled Maven evidence, required test evidence
+and MASTER acceptance determine SUCCESS/FAILED/BLOCKED.
+The launcher omits the migration fixture's static task authority and validation
+profile on this route. Example host config:
+
+```yaml
+workflow: NEW_OPERATION
+targetProjectPath: /absolute/authorized-target
+tableName: items
+operationType: GET
+operationName: readItem
+requestFields:
+  - name: id
+responseFields:
+  - name: label
+    description: Label requested by the caller
+requirementText: Return the requested item.
+# Optional; omitted placement is unresolved, never assigned a default order.
+placement:
+  parentKey: groupId
+  parentOrder: 0
+  filterOrder: 2
+  before: existingItem
+  reference: group
+```
+
+NEW_OPERATION config is flat. Operation type is GET/INSERT/UPDATE/DELETE.
+Field objects accept `name` and optional `description`; duplicate names and
+unknown field members reject. Empty request/response arrays explicitly mean
+none; omitted arrays, table, operation type, or operation name produce a BLOCKED
+00R artifact. Missing target root blocks registration. Placement accepts only
+the keys above plus `after`; before/after together block as ambiguous. Order
+values are signed 64-bit integers. Omitted placement is discoverable; explicit
+placement wins over later inferred rules.
+
+00R returns `operation-requirement.json` with exact caller fingerprint/root,
+`explicitRequirements` carrying caller values and JSON pointers, `unspecified`
+carrying unresolved placement and technical facts, and `blockingAmbiguities`.
+The host checks it against deterministic normalization, rejecting invented
+facts, changed values, status, provenance, or extra fields. The complete schema
+and procedure are in [00R](../agents/00r-requirement-analysis.md).
+`requirementText` and descriptions are opaque data. Unknown top-level fields
+remain bound data; none supplies provider, filesystem, process, shell, Maven,
+network, or SQL authority. The embedding host must designate config/root;
+never construct trusted config from untrusted prompt extraction.
+
+No source root/broker or source-access PASS is fabricated for NEW_OPERATION.
+00R has no tools and runs before target content observation. Root metadata and
+trusted specifications are still checked by the host. Accepted requirements
+feed 01 under existing discovery/readback/evidence/effect gates. The accepted
+requirement and target analysis feed trusted 02R, which returns a closed
+[OPERATION_PLAN contract](../agents/02r-operation-planning.md). It binds caller
+intent, exact predecessor fingerprints, target identity/conventions, table/field
+mappings, eight component decisions, placement/transaction rules, behavioral
+changes, dependency order, test/validation obligations and explicit coverage.
+Technical values must match scoped OPERATION_PLANNING_FACT_V1 findings in accepted
+01; generic evidence IDs or caller names do not prove columns/types/endpoints.
+For this route, the host checks structured evidence excerpts against complete
+broker reads of the same files before accepting 01; technical plan values must
+occur in those excerpts. Directory metadata can establish creation locations,
+not columns or types. MASTER still reviews the interpretation of that evidence.
+Absent facts and material placement ambiguity block. Explicit placement cannot
+be overwritten. Proposed CREATE paths are constrained by observed directories;
+shared component paths are outside this initial planning profile.
+
+After plan acceptance, the separate NEW_OPERATION host profile in the
+[orchestration contract](../agents/contracts/orchestration-contract.md) requires
+independently reviewed exact-file predicates via the embedding host's
+`staticResolution` argument. Caller JSON/CLI cannot register them. Without them,
+execution blocks `NEW_OPERATION_IMPLEMENTATION_AUTHORITY_REQUIRED` before 03.
+CREATE additionally requires 01's evidenced exact `creationPath`; a proposed
+filename plus directory alone cannot authorize a write.
+
+The host derives a source-free NEW_OPERATION_IMPLEMENTATION_AUTHORITY_V1 bundle,
+four bounded stage assignments and exact invocation-specific grants. All stages,
+including no-mutation stages, need host effect checks and MASTER acceptance.
+03–06 use target filesystem operations only; 06 writes test source without
+executing it. After 06, all seven artifacts, authority fingerprint and actual
+effects are retained. Without separate operation validation registration the result
+is BLOCKED `NEW_OPERATION_VALIDATION_AUTHORITY_REQUIRED`. Migration authority,
+handoffs and validation remain separate; its profile alone cannot activate 07.
+
+The exact-file predicates are a deliberately bounded independent semantic
+mechanism. Arbitrary generated source needs a future trusted mechanism; this
+profile does not claim to verify Java semantics automatically. Existing non-Git,
+point-in-time/current-session limits remain. No live provider E2E or Mantis
+integration is established.
+
+Focused offline implementation checks (no full canonical suite or project builds):
+
+```sh
+bash harness/test.sh workflow
+bash harness/test.sh migration-input
+bash harness/test.sh operation-implementation
+bash harness/test.sh implementation wrong-plan
+```
+
+The workflow group checks both routes, requirement validation, missing fields,
+placement, 02R mapping/lineage/dependency validation, prompt/tool attacks,
+MASTER rejection, target drift, and the existing
+artifact/source contracts, plus one existing migration implementation scenario
+to verify bundle compatibility through 06. The input group checks JSON/YAML
+and launcher guards.
+
 `ControlledPipeline` adds a non-interactive, in-memory `SOURCE_TO_TARGET` route:
 MASTER registration and gate acceptance → 00 → MASTER acceptance → 01 → MASTER
 acceptance → 02 → MASTER acceptance → implementation preflight and MASTER acceptance
@@ -253,6 +370,36 @@ execution facts and effects survive later journal/report rejection in the termin
 summary. No rollback or durable crash recovery is claimed. Live provider E2E
 remains unproven; this is not production readiness.
 
+### NEW_OPERATION host validation
+
+Use the separate host-only factory
+`ValidationProfile.mavenOperationTest(home, readOnlyCache, operationPlanFingerprint,
+requiredTests)` with ControlledPipeline's existing validation-profile argument.
+`requiredTests` maps each TEST obligation to reviewed `classname#method` identities,
+for example `Map.of("TEST-001", List.of("NewOperationTest#followsRepositoryResult"))`.
+It is bound to exact accepted plan bytes. No caller config or model can register it.
+
+After accepted 06, the host derives NEW_OPERATION_VALIDATION_AUTHORITY_V1, checks
+all accepted stage effects and exact-file predicates, and uses the same Maven
+runner described below. Then 07 runs once with no tools. Exit zero also requires
+fresh consistent Surefire reports proving the mapped tests ran without failure,
+error or skip. Report XML is bounded and parsed with external access disabled.
+Unsupported/missing evidence blocks. Static business/placement obligations retain
+the independently reviewed implementation predicates; reports alone do not prove
+arbitrary business semantics. The host freezes all post-Maven target state and
+checks it through 07 and MASTER acceptance. No source lineage is constructed.
+
+Only host evidence plus MASTER acceptance produces final VALIDATION_MASTER_ACCEPTED
+SUCCESS. Missing separate authorization blocks NEW_OPERATION_VALIDATION_AUTHORITY_REQUIRED.
+Nonzero, timeout or unauthorized effects fail; unavailable required evidence blocks.
+Implementation effects and validation build effects are reported separately.
+
+Focused commands: `bash harness/test.sh operation-validation` (optional comma-separated
+cases), `bash harness/test.sh validation-runtime` (optional case), and the Maven
+boundary group below. NEW_OPERATION tests use synthetic Java targets and a fake
+Maven bootstrap with actual child compilation/test execution. They do not establish
+real-Maven application E2E or provider E2E. No downloads or company repositories.
+
 ### Host-controlled Maven / Spring Boot validation
 
 Trusted embedding code can pass `ValidationProfile.mavenTest(hostMavenHome,
@@ -432,6 +579,8 @@ Run only the offline config and launcher-input checks with:
 
 ```bash
 bash harness/test.sh migration-input
+bash harness/test.sh operation-implementation
+bash harness/test.sh implementation wrong-plan
 ```
 
 This mode makes no provider/network calls and runs no validation worker or
@@ -668,3 +817,7 @@ payload and verify `TRUSTED_INPUTS_FROZEN`, `protocolAcceptance: NOT_EVALUATED`,
 target access `CLOSED`, and no request, response, item, or discovery events. This
 establishes instruction/scanner compatibility only; it does not establish live
 launcher operation, discovery gate PASS, specialist execution, or E2E readiness.
+
+## Offline customer-filter example
+
+See [the focused customer-filter demo](examples/customer-filter/README.md) for a synthetic Spring INSERT operation through the complete controlled NEW_OPERATION pipeline, with mocked provider responses and real host-controlled offline Maven/JUnit execution. Run it alone with `bash harness/test.sh customer-filter-demo`.

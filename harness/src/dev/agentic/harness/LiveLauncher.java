@@ -18,7 +18,16 @@ public final class LiveLauncher {
                 System.exit(2);
                 return;
             }
-            MigrationInput input = load(Path.of(args[2]));
+            MigrationInput input;
+            try { input = load(Path.of(args[2])); }
+            catch (IllegalArgumentException rejected) {
+                if (!"UNSUPPORTED_WORKFLOW".equals(rejected.getMessage())
+                        && !"WORKFLOW_ROUTING_AMBIGUOUS".equals(rejected.getMessage())) throw rejected;
+                var result = ControlledPipeline.inputRejected(rejected, false);
+                System.out.println(Json.write(result.report()));
+                System.exit(result.status().equals("BLOCKED") ? 2 : 1);
+                return;
+            }
             ControlledHarness.Config config = new ControlledHarness.Config(args[3], Integer.parseInt(args[4]));
             ProviderTransport client = HostProviderConfiguration.directOpenAI().open();
             ControlledPipeline.Result result = run(Path.of(args[1]), input, config, client);
@@ -43,6 +52,8 @@ public final class LiveLauncher {
     }
     static ControlledPipeline.Result run(Path trustedRoot, MigrationInput input, ControlledHarness.Config config,
                                          ProviderTransport client) throws Exception {
+        if (input.workflow() == Workflow.NEW_OPERATION)
+            return new ControlledPipeline(trustedRoot, input, config, client).run();
         return new ControlledPipeline(trustedRoot, input, config, client, LiveFixture.resolution(),
                 ValidationProfile.controlledJavaContractTest(LiveFixture.approvedSources())).run();
     }

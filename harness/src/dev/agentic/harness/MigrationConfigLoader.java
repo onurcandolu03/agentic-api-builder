@@ -28,15 +28,18 @@ final class MigrationConfigLoader {
         if (!yaml) return MigrationInput.fromJson(bytes);
         if (bytes.length == 0 || bytes.length > MigrationInput.MAX_BYTES)
             throw new IllegalArgumentException("MIGRATION_INPUT_SIZE");
+        String normalized;
         try {
             // Emit only JSON syntax, then reuse ALL existing input parsing, secret screening,
             // routing and normalization. Preserve number lexemes for Jackson's existing types,
             // including decimals/large numbers; Json.write is intentionally integer-only.
-            return MigrationInput.fromJson(new DataOnlyYaml(MigrationInput.utf8(bytes)).json());
+            normalized = new DataOnlyYaml(MigrationInput.utf8(bytes)).json();
         } catch (RuntimeException rejected) {
             // SnakeYAML exceptions can contain source excerpts, tags, paths and secrets.
             throw new IllegalArgumentException("MIGRATION_INPUT_YAML_REJECTED");
         }
+        // Preserve safe routing validation codes across JSON and YAML.
+        return MigrationInput.fromJson(normalized);
     }
 
     private static final class DataOnlyYaml {

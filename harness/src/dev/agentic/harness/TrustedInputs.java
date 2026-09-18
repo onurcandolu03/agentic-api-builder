@@ -12,8 +12,10 @@ final class TrustedInputs {
     enum Role {
         MASTER("MASTER", "MASTER.md", "MASTER_SPECIFICATION"),
         SOURCE_ANALYSIS("00-source-analysis", "agents/00-source-analysis.md", "AGENT_00_SPECIFICATION"),
+        REQUIREMENT_ANALYSIS("00r-requirement-analysis", "agents/00r-requirement-analysis.md", "AGENT_00R_SPECIFICATION"),
         ANALYSIS("01-target-analysis", "agents/01-target-analysis.md", "AGENT_01_SPECIFICATION"),
         PLANNING("02-migration-planning", "agents/02-migration-planning.md", "AGENT_02_SPECIFICATION"),
+        OPERATION_PLANNING("02r-operation-planning", "agents/02r-operation-planning.md", "AGENT_02R_SPECIFICATION"),
         DOMAIN("03-domain-contract-implementation", "agents/03-domain-contract-implementation.md", "SPECIALIST_SPECIFICATION"),
         PERSISTENCE("04-persistence-mapping-implementation", "agents/04-persistence-mapping-implementation.md", "SPECIALIST_SPECIFICATION"),
         SERVICE("05-service-api-implementation", "agents/05-service-api-implementation.md", "SPECIALIST_SPECIFICATION"),
@@ -84,9 +86,11 @@ final class TrustedInputs {
     private final Path root;
     private final List<Source> sources;
     private final String instructions;
+    private final Workflow workflow;
 
-    private TrustedInputs(Path root, List<Source> sources, boolean execution) {
+    private TrustedInputs(Path root, List<Source> sources, boolean execution, Workflow workflow) {
         this.root = root;
+        this.workflow = workflow;
         this.sources = List.copyOf(sources);
         StringBuilder assembled = new StringBuilder(execution ? EXECUTION_PREAMBLE : PREAMBLE);
         for (Source source : sources) {
@@ -101,6 +105,10 @@ final class TrustedInputs {
     }
 
     static TrustedInputs freeze(Path suppliedRoot, Path target, boolean execution) throws IOException {
+        return freeze(suppliedRoot, target, execution, Workflow.MIGRATION);
+    }
+
+    static TrustedInputs freeze(Path suppliedRoot, Path target, boolean execution, Workflow workflow) throws IOException {
         if (!suppliedRoot.isAbsolute() || !target.isAbsolute()) throw new IOException("ABSOLUTE_ROOT_REQUIRED");
         // Resolve only directory metadata before reading any trusted bytes. A target alias must
         // not hide overlap until the later broker registration step.
@@ -111,8 +119,8 @@ final class TrustedInputs {
         exclude(root, resolvedTarget);
         List<Source> sources = new ArrayList<>();
         sources.add(read(root, "agents/contracts/orchestration-contract.md", "ORCHESTRATION_CONTRACT"));
-        for (Role role : Role.values()) sources.add(read(root, role.location, role.artifactRole));
-        return new TrustedInputs(root, sources, execution);
+        for (Role role : workflow.roles()) sources.add(read(root, role.location, role.artifactRole));
+        return new TrustedInputs(root, sources, execution, workflow);
     }
 
     static void exclude(Path root, Path target) throws IOException {
@@ -160,9 +168,10 @@ final class TrustedInputs {
     List<Map<String, Object>> registry() { return sources.stream().map(Source::view).toList(); }
     Map<String, Object> registryIdentity() { return Json.evidenceFingerprint(registry()); }
     List<Map<String, Object>> roleBindings() {
-        return Arrays.stream(Role.values()).sorted(Comparator.comparing(r -> r.id))
+        return workflow.roles().stream().sorted(Comparator.comparing(r -> r.id))
                 .map(r -> Json.object("role", r.id, "profileId", "fixed-sequential-v1",
                         "specificationFingerprint", sources.stream().filter(s -> s.path.equals(root.resolve(r.location)))
                                 .findFirst().orElseThrow().view().get("artifactFingerprint"))).toList();
     }
+    List<Role> roles() { return workflow.roles(); }
 }

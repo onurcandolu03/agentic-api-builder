@@ -286,10 +286,10 @@ public final class SourceContractTest {
         var registry = trusted.registry();
         check(registry.size() == 10, "contract plus MASTER and 00–07: ten documents");
         List<String> paths = new ArrayList<>(List.of("agents/contracts/orchestration-contract.md"));
-        paths.addAll(Arrays.stream(TrustedInputs.Role.values()).map(role -> role.location).toList());
+        paths.addAll(Workflow.MIGRATION.roles().stream().map(role -> role.location).toList());
         for (int i = 0; i < paths.size(); i++) {
             Path file = root.resolve(paths.get(i));
-            String role = i == 0 ? "ORCHESTRATION_CONTRACT" : TrustedInputs.Role.values()[i - 1].artifactRole;
+            String role = i == 0 ? "ORCHESTRATION_CONTRACT" : Workflow.MIGRATION.roles().get(i - 1).artifactRole;
             check(registry.get(i).get("resolvedLocation").equals(file.toString()), "explicit registry location");
             check(registry.get(i).get("artifactFingerprint").equals(Json.fingerprint(role, Files.readAllBytes(file))),
                     "fingerprint covers exact current trusted bytes for " + paths.get(i));

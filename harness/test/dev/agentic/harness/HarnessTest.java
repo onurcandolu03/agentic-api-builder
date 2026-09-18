@@ -130,7 +130,7 @@ public final class HarnessTest {
         final Path source = Files.createDirectory(root.resolve("source"));
         Fixture() throws IOException {
             write(trusted.resolve("agents/contracts/orchestration-contract.md"), "Trusted contract fixture.\n");
-            for (var role : TrustedInputs.Role.values())
+            for (var role : Workflow.MIGRATION.roles())
                 write(trusted.resolve(role.location), "Trusted fixture specification for " + role.id + ".\n");
         }
         ControlledHarness harness(ResponsesClient client) {
@@ -262,9 +262,9 @@ public final class HarnessTest {
         List<String> expected = List.of("MASTER", "00-source-analysis", "01-target-analysis", "02-migration-planning",
                 "03-domain-contract-implementation", "04-persistence-mapping-implementation",
                 "05-service-api-implementation", "06-test-implementation", "07-validation");
-        check(Arrays.stream(TrustedInputs.Role.values()).map(role -> role.id).toList()
+        check(Workflow.MIGRATION.roles().stream().map(role -> role.id).toList()
                 .equals(expected), "exact registry in deterministic assembly order");
-        check(TrustedInputs.Role.values().length == 9, "no duplicate roles");
+        check(Workflow.MIGRATION.roles().size() == 9, "no duplicate roles");
         var sourceRole = TrustedInputs.Role.find("00-source-analysis");
         check(sourceRole == TrustedInputs.Role.SOURCE_ANALYSIS, "first-class source enum role");
         check(sourceRole.location.equals("agents/00-source-analysis.md"), "exact source role path");
@@ -584,15 +584,15 @@ public final class HarnessTest {
         var trusted = TrustedInputs.freeze(fixture.trusted, fixture.target);
         check(trusted.registry().size() == 10, "exact ten trusted sources");
         check(trusted.roleBindings().size() == 9, "nine profile bindings");
-        var sortedRoles = Arrays.stream(TrustedInputs.Role.values()).map(r -> r.id).sorted().toList();
+        var sortedRoles = Workflow.MIGRATION.roles().stream().map(r -> r.id).sorted().toList();
         check(trusted.roleBindings().stream().map(r -> r.get("role")).toList().equals(sortedRoles),
                 "profile bindings preserve contract role sort including 00");
         var expectedLocations = new ArrayList<String>(List.of("agents/contracts/orchestration-contract.md"));
-        expectedLocations.addAll(Arrays.stream(TrustedInputs.Role.values()).map(r -> r.location).toList());
+        expectedLocations.addAll(Workflow.MIGRATION.roles().stream().map(r -> r.location).toList());
         for (int i = 0; i < expectedLocations.size(); i++) {
             var actual = trusted.registry().get(i);
             Path exactPath = fixture.trusted.resolve(expectedLocations.get(i));
-            String artifactRole = i == 0 ? "ORCHESTRATION_CONTRACT" : TrustedInputs.Role.values()[i - 1].artifactRole;
+            String artifactRole = i == 0 ? "ORCHESTRATION_CONTRACT" : Workflow.MIGRATION.roles().get(i - 1).artifactRole;
             check(actual.get("resolvedLocation").equals(exactPath.toString()), "fixed chain order and exact path");
             check(actual.get("artifactFingerprint").equals(Json.fingerprint(artifactRole, Files.readAllBytes(exactPath))),
                     "each fingerprint covers exact original UTF8 bytes and artifact role");
@@ -734,7 +734,7 @@ public final class HarnessTest {
         var mock = new Mock();
         var harness = new Fixture().created(mock);
         var initial = harness.inspect();
-        for (var role : TrustedInputs.Role.values()) {
+        for (var role : Workflow.MIGRATION.roles()) {
             if (role == TrustedInputs.Role.MASTER) continue;
             harness.switchRole(role.id, "resp_1");
             check(harness.inspect().get("activeRole").equals(role.id), "actual role selected");

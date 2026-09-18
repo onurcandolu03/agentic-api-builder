@@ -43,6 +43,7 @@ public final class ControlledHarness {
     private final boolean executionMode;
     private final TargetBroker broker = new TargetBroker();
     private final SourceBoundary sourceBoundary;
+    private final Workflow workflow;
     private final Evidence evidence;
     private final String contextId = UUID.randomUUID().toString();
     private final List<Map<String, Object>> lineage = new ArrayList<>();
@@ -88,6 +89,11 @@ public final class ControlledHarness {
     }
     ControlledHarness(Path trustedRoot, Path declaredSource, Path declaredTarget,
                       Config config, ProviderTransport client, boolean executionMode) {
+        this(trustedRoot, declaredSource, declaredTarget, config, client, executionMode, Workflow.MIGRATION);
+    }
+    ControlledHarness(Path trustedRoot, Path declaredSource, Path declaredTarget,
+                      Config config, ProviderTransport client, boolean executionMode, Workflow workflow) {
+        this.workflow = Objects.requireNonNull(workflow);
         this.trustedRoot = Objects.requireNonNull(trustedRoot);
         this.declaredSource = declaredSource;
         this.declaredTarget = Objects.requireNonNull(declaredTarget);
@@ -114,6 +120,7 @@ public final class ControlledHarness {
 
     private Map<String, Object> runtimeConfiguration() {
         return Json.object("harnessVersion", VERSION, "executionProfile", executionMode ? "CONTROLLED_SEQUENTIAL_V1" : "FOUNDATION_ONLY",
+                "workflow", workflow.name(),
                 "javaRuntimeVersion", Runtime.version().toString(),
                 "controlMode", "FIXED_TRUSTED_CONTEXT", "launchMechanism", "HOST_SAME_CONTEXT_SEQUENTIAL",
                 "startupCwd", startupCwd, "trustedRootDesignation", trustedRoot.toString(),
@@ -161,7 +168,7 @@ public final class ControlledHarness {
                     evidence.append("SOURCE_METADATA_REGISTERED", metadata.view());
                     require(State.INITIALIZED);
                 }
-                var frozen = TrustedInputs.freeze(trustedRoot, declaredTarget, executionMode);
+                var frozen = TrustedInputs.freeze(trustedRoot, declaredTarget, executionMode, workflow);
                 if (sourceBoundary != null) sourceBoundary.verify();
                 evidence.safe(frozen.instructions());
                 evidence.append("TRUSTED_INPUTS_FROZEN", Json.object("registry", frozen.registry(),
@@ -230,6 +237,7 @@ public final class ControlledHarness {
             if (!Objects.equals(responseId, expectedPrevious)
                     || !selectedRole.id.equals(binding.get("role")))
                 throw stop(State.FAILED, "EXECUTION_BINDING_MISMATCH");
+            if (!trusted.roles().contains(selectedRole)) throw stop(State.BLOCKED, "WORKFLOW_ROLE_UNAVAILABLE");
             role = selectedRole;
             roleSwitchCounter++;
             String marker = Json.write(Json.object("format", "HOST_EXECUTION_TURN_V1", "binding", binding,
@@ -502,6 +510,7 @@ public final class ControlledHarness {
                 TrustedInputs.Role next;
                 try { next = TrustedInputs.Role.find(requestedRole); }
                 catch (RuntimeException invalid) { throw stop(State.BLOCKED, "UNKNOWN_ROLE"); }
+                if (!trusted.roles().contains(next)) throw stop(State.BLOCKED, "WORKFLOW_ROLE_UNAVAILABLE");
                 if (next == role || (role != TrustedInputs.Role.MASTER && next != TrustedInputs.Role.MASTER))
                     throw stop(State.BLOCKED, "NON_SEQUENTIAL_ROLE_SWITCH");
                 role = next;

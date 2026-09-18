@@ -23,6 +23,8 @@ final class ArtifactContracts {
         try { value = Json.parse(text); }
         catch (RuntimeException malformed) { throw new IllegalArgumentException("ARTIFACT_JSON_REJECTED"); }
         switch (role) {
+            case REQUIREMENT_ANALYSIS -> OperationRequirement.validate(value, input);
+            case OPERATION_PLANNING -> OperationPlanContract.validate(value, input, accepted);
             case SOURCE_ANALYSIS -> source(value, input);
             case ANALYSIS -> target(value, input);
             case PLANNING -> plan(value, input, accepted);
@@ -33,6 +35,7 @@ final class ArtifactContracts {
     }
 
     private static void source(Map<String, Object> v, MigrationInput input) {
+        if (input.workflow() != Workflow.MIGRATION) fail("ARTIFACT_WORKFLOW_MISMATCH");
         fields(v, "analysisVersion status project analysisScope callerProvidedMigrationInfo technologyProfile operationEntryPoint callChain inputContract outputContract persistenceBehavior externalDependencies businessRules validationBehavior errorBehavior transactionBehavior findings evidence conflicts uncertainties blockingQuestions analysisCoverage");
         equal(v.get("analysisVersion"), 1, "ANALYSIS_VERSION");
         String status = enumeration(v.get("status"), STATUS);
@@ -195,6 +198,7 @@ final class ArtifactContracts {
     }
 
     private static void plan(Map<String, Object> v, MigrationInput input, Map<String, byte[]> accepted) {
+        if (input.workflow() != Workflow.MIGRATION) fail("ARTIFACT_WORKFLOW_MISMATCH");
         fields(v, "planningVersion status migrationMode sourceProject targetProject migrationRequest requirements targetMappings componentDecisions implementationOrder validationPlan risks manualReviewItems blockingIssues coverage");
         equal(v.get("planningVersion"), 1, "PLANNING_VERSION");
         String status = enumeration(v.get("status"), STATUS);
@@ -665,7 +669,7 @@ final class ArtifactContracts {
         if (status.equals("FAILED") && limits.isEmpty()) fail("FAILED_REASON_MISSING");
     }
 
-    private static void collectFindings(Object value, Map<String, Map<String, Object>> result) {
+    static void collectFindings(Object value, Map<String, Map<String, Object>> result) {
         var target = object(value);
         var project = object(target.get("project"));
         collectFindingArray(project.get("frameworks"), result);

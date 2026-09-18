@@ -22,6 +22,11 @@ final class MavenValidation {
         frozen = current();
     }
     Map<String,Object> identity() { return frozen; }
+    void verifyTargetRoot(Path target) throws Exception {
+        canonicalDirectory(target);
+        for (Path trusted : List.of(home, repository))
+            if (trusted.startsWith(target) || target.startsWith(trusted)) reject();
+    }
     void verifyRoots(Path source, Path target) throws Exception {
         canonicalDirectory(source); canonicalDirectory(target);
         if (source.startsWith(target) || target.startsWith(source)) reject();

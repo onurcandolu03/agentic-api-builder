@@ -1,0 +1,18 @@
+{
+  "workflow": "NEW_OPERATION",
+  "targetProjectPath": "/ABSOLUTE/PATH/TO/customer-management",
+  "tableName": "CUSTOMER_FILTER",
+  "operationType": "INSERT",
+  "operationName": "addCustomerFilter",
+  "requestFields": [
+    {"name": "id", "description": "Unique filter key; example NEW_FILTER"},
+    {"name": "label", "description": "Display name; example New Filter"},
+    {"name": "parentKey", "description": "Existing hierarchy key"},
+    {"name": "after", "description": "Existing sibling filter key"}
+  ],
+  "responseFields": [
+    {"name": "id"}, {"name": "label"}, {"name": "parentKey"}, {"name": "filterOrder"}
+  ],
+  "placement": {"parentKey": "CUSTOMER_INFORMATION", "after": "CUSTOMER_TITLE"},
+  "requirementText": "Add New Filter after Customer Title in Customer Information. Preserve existing sibling order and the target's coordinated insertion rule."
+}

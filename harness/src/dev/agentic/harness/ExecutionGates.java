@@ -28,14 +28,15 @@ final class ExecutionGates {
         initialObservation = observation;
         initialConfiguration = ExecutionPlan.map(observation.get("runtimeConfiguration"));
         initialTarget = ExecutionPlan.map(ExecutionPlan.map(observation.get("targetMetadata")).get("targetScope"));
-        initialSource = ExecutionPlan.map(ExecutionPlan.map(observation.get("sourceMetadata")).get("sourceScope"));
+        initialSource = sourceScope(observation);
         initialBindings = harness.executionTrustedInputs().roleBindings();
         definition = Json.object("provider", PROVIDER, "controlMode", "FIXED_TRUSTED_CONTEXT",
                 "implementation", "ControlledHarness.executionTurn/RoleExecutor/SourceBroker/TargetContentBroker",
-                "startup", "Explicit host-selected trusted root and ten exact paths frozen before first provider request",
+                "startup", "Explicit host-selected trusted root and workflow-specific exact paths frozen before first provider request",
                 "selection", "No AGENTS loader, directory discovery, environment instruction fallback, repository tools or nested contexts",
                 "continuation", "Every create includes identical frozen instructions and exact predecessor; retrieve and ordered input-item readback are required",
                 "roleSelection", "Only the host selects one registered role; response binding must exactly echo the current invocation",
+                "requirementRoute", "00R has no tools; target content broker and snapshots start only after requirement acceptance",
                 "sourceRoute", "SourceBroker exposes READ_TEXT, LIST_PATHS, SEARCH_TEXT and METADATA only to 00 after source and target gates",
                 "targetRoute", "TargetContentBroker requires current discovery acceptance; target-only analysis read; 02 has no repository access; writes require accepted exact plan grants",
                 "containment", "Registered distinct roots; nofollow POSIX component checks, root/ancestor identity rechecks, regular-file hardlinks rejected",
@@ -53,7 +54,7 @@ final class ExecutionGates {
         definitionFingerprint = Json.evidenceFingerprint(definition);
         evidence.append("EXECUTION_EFFECTIVE_CONFIGURATION", initialConfiguration);
         configurationFingerprint = Json.evidenceFingerprint(initialConfiguration);
-        List<String> roles = Arrays.stream(TrustedInputs.Role.values()).map(r -> r.id).sorted().toList();
+        List<String> roles = harness.executionTrustedInputs().roles().stream().map(r -> r.id).sorted().toList();
         Map<String,Object> profile = Json.object("profileId", PROFILE, "roles", roles,
                 "launchMechanism", "HOST_SAME_CONTEXT_SEQUENTIAL", "controlMode", "FIXED_TRUSTED_CONTEXT",
                 "controlDefinitionFingerprint", definitionFingerprint,
@@ -65,7 +66,7 @@ final class ExecutionGates {
         Map<String,Object> attrs = Files.readAttributes(trustedRoot, "unix:dev,ino", LinkOption.NOFOLLOW_LINKS);
         String identity = "POSIX:" + Long.toUnsignedString(((Number)attrs.get("dev")).longValue())
                 + ":" + Long.toUnsignedString(((Number)attrs.get("ino")).longValue());
-        sourceDeclaration = Json.object("declarationVersion", 1, "capabilityId", "SOURCE_READ_ONLY_CONTROL",
+        sourceDeclaration = initialSource == null ? null : Json.object("declarationVersion", 1, "capabilityId", "SOURCE_READ_ONLY_CONTROL",
                 "provider", PROVIDER, "sourceScope", Json.object("declaredRoot", initialSource.get("declaredRoot"),
                         "resolvedRoot", initialSource.get("resolvedRoot"),
                         "rootFilesystemIdentity", initialSource.get("rootFilesystemIdentity"), "accessMode", "READ_ONLY"),
@@ -74,7 +75,7 @@ final class ExecutionGates {
                 "sessionReference", harness.executionContextId(), "sourceContentRoles", List.of("00-source-analysis"),
                 "profiles", List.of(profile));
         evidence.append("RUNTIME_CAPABILITY_DECLARATION", discoveryDeclaration);
-        evidence.append("RUNTIME_CAPABILITY_DECLARATION", sourceDeclaration);
+        if (sourceDeclaration != null) evidence.append("RUNTIME_CAPABILITY_DECLARATION", sourceDeclaration);
     }
 
     Map<String,Object> check(String stage, RoleExecutor.Invocation invocation,
@@ -82,7 +83,7 @@ final class ExecutionGates {
         Map<String,Object> observation = observe();
         if (!initialConfiguration.equals(observation.get("runtimeConfiguration"))
                 || !initialTarget.equals(ExecutionPlan.map(observation.get("targetMetadata")).get("targetScope"))
-                || !initialSource.equals(ExecutionPlan.map(observation.get("sourceMetadata")).get("sourceScope"))
+                || !Objects.equals(initialSource, sourceScope(observation))
                 || !initialBindings.equals(harness.executionTrustedInputs().roleBindings())
                 || !harness.executionContextId().equals(observation.get("logicalContextId"))
                 || !Boolean.TRUE.equals(observation.get("readbackCaptured")))
@@ -92,7 +93,7 @@ final class ExecutionGates {
                 || !List.of().equals(initialConfiguration.get("tools")))
             throw new IllegalArgumentException("RUNTIME_GATE_CONFIGURATION_MISMATCH");
         List<String> boundRoles = initialBindings.stream().map(v -> (String)v.get("role")).toList();
-        if (!boundRoles.equals(Arrays.stream(TrustedInputs.Role.values()).map(r -> r.id).sorted().toList()))
+        if (!boundRoles.equals(harness.executionTrustedInputs().roles().stream().map(r -> r.id).sorted().toList()))
             throw new IllegalStateException("RUNTIME_ROLE_PROFILE_INCOMPLETE");
         // Before dispatch the inspected response still belongs to the predecessor. Entry/exit
         // checks must instead prove that this invocation owns the completed correlated turn.
@@ -115,12 +116,12 @@ final class ExecutionGates {
                 Json.object("sourceEligible", "PASS", "targetMatches", "PASS", "profilesCovered", "PASS",
                         "modeSupported", "PASS", "configurationEffective", "PASS", "invocationCorrelated", "PASS",
                         "continuityCurrent", "PASS"));
-        sourceCheck = checkObject("SOURCE_ACCESS_CHECK_V1", stage, invocation, authorities, bundle,
+        sourceCheck = sourceDeclaration == null ? null : checkObject("SOURCE_ACCESS_CHECK_V1", stage, invocation, authorities, bundle,
                 declarationFingerprint(sourceDeclaration), observations,
                 Json.object("providerEligible", "PASS", "rootsSeparated", "PASS", "sourceReadOnly", "PASS",
                         "sourceDiscoveryExcluded", "PASS", "invocationCorrelated", "PASS", "continuityCurrent", "PASS"));
         evidence.append("DISCOVERY_CONTROL_CHECK_V1", discoveryCheck);
-        evidence.append("SOURCE_ACCESS_CHECK_V1", sourceCheck);
+        if (sourceCheck != null) evidence.append("SOURCE_ACCESS_CHECK_V1", sourceCheck);
         return delivery();
     }
     private Map<String,Object> checkObject(String kind, String stage, RoleExecutor.Invocation invocation,
@@ -191,15 +192,26 @@ final class ExecutionGates {
         return material == null ? null : Json.object("fingerprint", Json.evidenceFingerprint(material), "material", material);
     }
     List<Map<String,Object>> declarationFingerprints() {
-        return List.of(declarationFingerprint(discoveryDeclaration), declarationFingerprint(sourceDeclaration));
+        return declarations().stream().map(ExecutionGates::declarationFingerprint).toList();
     }
     List<Map<String,Object>> capabilities() {
-        return List.of(sourceDeclaration, discoveryDeclaration).stream().map(declaration -> Json.object(
+        return declarations().stream().map(declaration -> Json.object(
                 "capabilityId", declaration.get("capabilityId"), "provider", PROVIDER,
                 "declarationFingerprint", declarationFingerprint(declaration), "policyFingerprint", null)).toList();
     }
+    private List<Map<String,Object>> declarations() {
+        return sourceDeclaration == null ? List.of(discoveryDeclaration) : List.of(sourceDeclaration, discoveryDeclaration);
+    }
+    private Map<String,Object> sourceScope(Map<String,Object> observation) {
+        if (observation.get("sourceMetadata") == null) {
+            if (harness.executionTrustedInputs().roles().contains(TrustedInputs.Role.SOURCE_ANALYSIS))
+                throw new IllegalStateException("SOURCE_METADATA_REQUIRED");
+            return null;
+        }
+        return ExecutionPlan.map(ExecutionPlan.map(observation.get("sourceMetadata")).get("sourceScope"));
+    }
     private static Map<String,Object> declarationFingerprint(Map<String,Object> value) {
-        return Json.fingerprint("RUNTIME_CAPABILITY_DECLARATION", Json.bytes(value));
+        return value == null ? null : Json.fingerprint("RUNTIME_CAPABILITY_DECLARATION", Json.bytes(value));
     }
     static Map<String,Object> fingerprint(Map<String,Object> value) {
         return value == null ? null : Json.fingerprint((String)value.get("checkKind"), Json.bytes(value));

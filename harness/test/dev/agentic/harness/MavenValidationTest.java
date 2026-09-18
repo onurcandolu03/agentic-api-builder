@@ -212,7 +212,8 @@ public final class MavenValidationTest {
         var attrs = Files.readAttributes(path, "unix:dev,ino");
         return "POSIX:" + attrs.get("dev") + ":" + attrs.get("ino");
     }
-    private static Path installation(String mode, Path target) throws Exception {
+    private static Path installation(String mode, Path target) throws Exception { return installation(temp, mode, target); }
+    static Path installation(Path temp, String mode, Path target) throws Exception {
         Path home = Files.createTempDirectory(temp, "host maven-$()-");
         Files.createDirectory(home.resolve("boot")); Files.createDirectory(home.resolve("lib"));
         Path build = Files.createTempDirectory(temp, "fake-bootstrap-");
@@ -239,6 +240,30 @@ public final class MavenValidationTest {
                                 || !args[8].startsWith("-Dmaven.repo.local=") || !args[9].equals("-Dstyle.color=never") || !args[10].equals("test"))
                             throw new AssertionError("argv");
                         Files.writeString(root.resolve("target/proof"), "ARGV_CWD_ENV_OK");
+                        if (MODE.startsWith("operation-")) {
+                            if (MODE.equals("operation-timeout")) Thread.sleep(120000);
+                            if (MODE.equals("operation-nonzero")) System.exit(17);
+                            if (MODE.equals("operation-mutate")) Files.writeString(root.resolve("src/NewOperation.java"), "unauthorized");
+                            if (MODE.equals("operation-missing") || MODE.equals("operation-mutate")) return;
+                            Path classes = Files.createDirectory(root.resolve("target/classes"));
+                            var compilerArgs = new ArrayList<String>(List.of("-proc:none", "-d", classes.toString()));
+                            try (var paths = Files.list(root.resolve("src"))) {
+                                paths.filter(p -> p.toString().endsWith(".java")).sorted().forEach(p -> compilerArgs.add(p.toString()));
+                            }
+                            if (javax.tools.ToolProvider.getSystemJavaCompiler().run(null, null, null, compilerArgs.toArray(String[]::new)) != 0)
+                                throw new AssertionError("compile");
+                            try (var loader = new java.net.URLClassLoader(new java.net.URL[]{classes.toUri().toURL()}, ClassLoader.getPlatformClassLoader())) {
+                                var test = loader.loadClass("NewOperationTest").getDeclaredMethod("followsRepositoryResult");
+                                test.setAccessible(true); test.invoke(null);
+                            }
+                            Path reports = Files.createDirectory(root.resolve("target/surefire-reports"));
+                            String content = "<testsuite tests='1' failures='0' errors='0' skipped='0'><testcase classname='NewOperationTest' name='followsRepositoryResult'/></testsuite>";
+                            if (MODE.equals("operation-skipped")) content = "<testsuite tests='1' failures='0' errors='0' skipped='1'><testcase classname='NewOperationTest' name='followsRepositoryResult'><skipped/></testcase></testsuite>";
+                            if (MODE.equals("operation-report-fail")) content = "<testsuite tests='1' failures='1' errors='0' skipped='0'><testcase classname='NewOperationTest' name='followsRepositoryResult'><failure/></testcase></testsuite>";
+                            if (MODE.equals("operation-xxe")) content = "<!DOCTYPE testsuite [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><testsuite>&x;</testsuite>";
+                            Files.writeString(reports.resolve("TEST-NewOperationTest.xml"), content);
+                            return;
+                        }
                         if (MODE.equals("nonzero")) { System.err.println("UNTRUSTED_LOG_SENTINEL /private/host/secret"); System.exit(17); }
                         if (MODE.equals("logs")) {
                             for (int i = 0; i < 4096; i++) { System.out.println("UNTRUSTED_LOG_SENTINEL"); System.err.println("UNTRUSTED_LOG_SENTINEL"); }

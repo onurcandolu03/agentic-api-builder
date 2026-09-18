@@ -14,6 +14,7 @@ public final class MigrationInput {
     private final Map<String, Object> information;
     private final Path sourceRoot, targetRoot;
     private final String requestedOperation;
+    private final Workflow workflow;
 
     private MigrationInput(byte[] supplied) {
         if (supplied == null || supplied.length == 0 || supplied.length > MAX_BYTES)
@@ -23,9 +24,25 @@ public final class MigrationInput {
         Evidence.rejectObviousSecrets(text);
         try { this.information = immutable(Json.parse(text)); }
         catch (RuntimeException malformed) { throw new IllegalArgumentException("MIGRATION_INPUT_JSON_REJECTED"); }
+        workflow = Workflow.read(information);
         Map<String, Object> routing = information;
-        if (routing.containsKey("migration")) routing = object(routing.get("migration"));
-        if (routing.containsKey("settings")) routing = object(routing.get("settings"));
+        if (workflow == Workflow.NEW_OPERATION) {
+            if (routing.containsKey("migration") || routing.containsKey("settings"))
+                throw new IllegalArgumentException("WORKFLOW_ROUTING_AMBIGUOUS");
+            targetRoot = root(routing, "targetProjectPath");
+            sourceRoot = null;
+            OperationRequirement.validateInput(routing);
+            requestedOperation = (String)routing.get("operationName");
+            return;
+        }
+        if (routing.containsKey("migration")) {
+            routing = object(routing.get("migration"));
+            rejectNestedWorkflow(routing);
+        }
+        if (routing.containsKey("settings")) {
+            routing = object(routing.get("settings"));
+            rejectNestedWorkflow(routing);
+        }
         sourceRoot = root(routing, "sourceProjectPath");
         targetRoot = root(routing, "targetProjectPath");
         requestedOperation = required(routing, "sourceOperationName");
@@ -49,11 +66,16 @@ public final class MigrationInput {
     public byte[] bytes() { return bytes.clone(); }
     public String text() { return text; }
     public Path sourceRoot() { return sourceRoot; }
+    public Workflow workflow() { return workflow; }
     public Path targetRoot() { return targetRoot; }
     public String requestedOperation() { return requestedOperation; }
     /** Unknown structures are retained, not interpreted as requirements or repository facts. */
     public Map<String, Object> callerInformation() { return information; }
     public Map<String, Object> fingerprint() { return Json.fingerprint("CALLER_MIGRATION_REQUEST", bytes); }
+
+    private static void rejectNestedWorkflow(Map<String,Object> routing) {
+        if (routing.containsKey("workflow")) throw new IllegalArgumentException("WORKFLOW_ROUTING_AMBIGUOUS");
+    }
 
     static String utf8(byte[] bytes) {
         try {

@@ -22,6 +22,282 @@ exists.
 Hashes and digests identify bytes for comparison and correlation. They do not
 authenticate an artifact, its author, its source, or its history.
 
+# Workflow Registration and Requirement-Analysis Extension
+
+Workflow is independent of the legacy `migrationMode`. The configured top-level
+`workflow` field accepts exactly `MIGRATION` or `NEW_OPERATION`; an absent field
+means MIGRATION solely for backward compatibility. Existing migration scope and
+source validation still applies. Unsupported selectors (including null or wrong
+types) return structured BLOCKED `UNSUPPORTED_WORKFLOW`; selectors inside the
+known `migration`/`settings` routing envelopes return BLOCKED
+`WORKFLOW_ROUTING_AMBIGUOUS`. The NEW_OPERATION input is flat and rejects these
+envelopes. Do not parse business prompt text to select a workflow or runtime
+capabilities. Malformed request data retains the existing FAILED validation
+convention; missing routing data returns BLOCKED.
+
+The exact host-registered caller request keeps artifact role
+`CALLER_MIGRATION_REQUEST` for both workflows. Business text is data within that
+artifact, not instruction or execution authority. Unknown top-level fields
+cannot configure providers, commands, Maven, network, arbitrary SQL, static
+implementation authority, filesystem grants, or validation policy.
+
+MIGRATION retains 00 → 01 → 02 and all existing post-planning contracts.
+NEW_OPERATION replaces 00 with trusted `00r-requirement-analysis`, fingerprinted
+as `AGENT_00R_SPECIFICATION`; its output is `OPERATION_REQUIREMENT` under the
+exact deterministic schema in `agents/00r-requirement-analysis.md`. 00R has no
+repository-content or mutation capability. Caller provenance, unresolved
+information, and blocking ambiguities remain separate. Exact explicit caller
+placement wins; absent values may only be derived later from cited target or
+schema evidence. No column, type, endpoint, technology, order, or convention is
+invented by 00R. Its accepted SUCCESS artifact replaces SOURCE_ANALYSIS only as
+01's pre-planning prerequisite; it is not source evidence or a migration plan.
+
+For the current NEW_OPERATION pre-planning profile, the frozen role set is
+MASTER, 00R, 01, 02R, and 03–07. The discovery profile must cover exactly that set,
+using the unchanged evidence/correlation/continuity predicates. No source is
+registered and no source-control declaration or check is produced. Register
+only target metadata before 00R; target content observation begins after 00R
+acceptance under the existing target discovery gate. 03–06 require the separate
+NEW_OPERATION implementation profile below; 07 requires the separate validation profile.
+The registered role `02r-operation-planning` uses
+`agents/02r-operation-planning.md` / `AGENT_02R_SPECIFICATION`. It consumes only
+bound inputs, has no repository or execution tools, and produces OPERATION_PLAN.
+Its closed schema binds the exact caller request, accepted OPERATION_REQUIREMENT
+and accepted TARGET_ANALYSIS, with no migration/source lineage. Structured
+OPERATION_PLANNING_FACT_V1 observations in 01's existing finding shape permit
+exact technical-value validation; they confer no runtime authority. Host checks
+correlate non-directory structured evidence excerpts with complete broker reads
+of the same paths before accepting 01 on this route. Technical values must occur
+in cited source/configuration/test excerpts; directories only prove placement
+of proposed files, never columns/types or business rules. These added checks
+leave the MIGRATION TARGET_ANALYSIS contract unchanged. Host checks
+reject unsupported mappings, caller/placement substitutions and incomplete
+SUCCESS claims. MASTER must additionally assess semantic support, accept exact
+bytes, and verify unchanged target state across invocation/acceptance/stop.
+After accepted 02R, run the separate host implementation preflight below.
+Accepting OPERATION_PLAN alone grants no execution authority.
+
+# NEW_OPERATION Controlled Implementation Profile
+
+This workflow-specific extension enables 03 → 04 → 05 → 06 only. It does not
+change MIGRATION's RUN_AUTHORITY_BUNDLE_V1, source lineage, handoffs, obligations,
+or validation behavior. The implementation sections below referring to a
+migration plan or SOURCE_ANALYSIS apply to MIGRATION only.
+
+Accepted OPERATION_PLAN remains data. The host revalidates its exact accepted
+bytes, accepted OPERATION_REQUIREMENT and TARGET_ANALYSIS, and their caller/root
+bindings. No source artifact, broker, gate, root or fingerprint is fabricated.
+03–06 never infer authority from business text, repository instructions, model
+output, or a copied fingerprint.
+
+## Independent host registration
+
+The embedding host may separately supply exact UTF-8 `staticResolution` bytes
+through ControlledPipeline's existing host registration argument. NEW_OPERATION
+requires this closed schema, distinct from migration static authority:
+
+```json
+{
+  "authorityVersion": 1,
+  "authorityKind": "NEW_OPERATION_EXACT_FILES_V1",
+  "lineage": {
+    "workflow": "NEW_OPERATION",
+    "callerRequestFingerprint": {},
+    "operationRequirementFingerprint": {},
+    "targetAnalysisFingerprint": {},
+    "operationPlanFingerprint": {}
+  },
+  "files": [{
+    "componentDecisionId": "CD-001",
+    "path": "src/Example.java",
+    "expectedText": "independently reviewed complete file bytes",
+    "obligationsFingerprint": {}
+  }]
+}
+```
+
+Fingerprint placeholders above require complete ArtifactFingerprint objects.
+Lineage must match exact current-session accepted artifacts and the caller.
+The files array contains exactly one rule for every MODIFY/CREATE component,
+none for REUSE/NOT_APPLICABLE. The obligations fingerprint uses role
+OPERATION_COMPONENT_OBLIGATIONS over the canonical host projection containing
+exact componentDecision, requestedOperation, targetConventions, databaseMapping,
+fieldMappings, placement, that component's behavioralObligations and
+testObligations, and validationObligations. It includes all placement and
+transaction constraints. Host approval of complete file bytes is the bounded
+independent semantic predicate; no model-created predicate or same-response
+self-report can supply it. The host must review these bytes against the bound
+obligations. The ordinary caller JSON/CLI does not register this policy.
+Missing policy blocks before mutation with
+NEW_OPERATION_IMPLEMENTATION_AUTHORITY_REQUIRED. Missing component rules also
+block. Unknown fields, extra rules, substituted paths/lineage/obligations reject.
+This initial profile does not autonomously establish correctness of arbitrary
+Java source; broader generation needs another independently trusted mechanism.
+
+## Paths and deterministic assignments
+
+MODIFY/REUSE paths remain bound to 01 evidence and are rechecked against current
+host-observed target state. CREATE also requires an OBSERVED scoped
+OPERATION_PLANNING_FACT_V1 with subject equal to the component category,
+property creationPath, and exact canonical targetPath value. Its source/config/
+test excerpt must support the literal path under the same fact checks as 02R.
+A creationDirectory alone never grants a model-selected filename. The destination
+must remain directly inside that evidenced directory. Missing exact destination
+blocks NEW_OPERATION_EXACT_CREATION_PATH_REQUIRED. All destinations/parents are
+preflighted before the first grant; symlinks, escapes, aliases and occupied CREATE
+paths reject. No directory creation/deletion/rename authority is issued.
+
+The host projects every component into exactly one of four stages:
+03 owns DOMAIN_MODEL/REQUEST_DTO/RESPONSE_DTO; 04 PERSISTENCE/MAPPER;
+05 SERVICE/API; 06 TESTS. Mutable plan steps must respect that role order.
+Assignments contain workflow, stage, componentDecisions, allowedWrites,
+obligations, implementationOrder, requiredPredecessorStages, noMutation.
+allowedWrites contains componentDecisionId, pathKey, action and the independent
+expectedContentFingerprint. Each stage runs once, including a stage with no
+mutation; REUSE/NOT_APPLICABLE issue no writes. 06 receives the exact plan test
+obligations and writes source only. Operation type GET/INSERT/UPDATE/DELETE never
+selects a hardcoded implementation or creates additional semantics.
+
+## Host bundle, grants and acceptance
+
+NEW_OPERATION_IMPLEMENTATION_AUTHORITY_V1 (both kind and fingerprint role)
+contains exactly bundleVersion, bundleKind, workflow, runId, lineage,
+hostPolicyFingerprint, targetIdentity, targetBaselineFingerprint,
+componentDecisions, assignments, trustedSpecifications, runtimeCapabilities,
+repositoryEffectPolicy, executionCapabilities, validationExecution.
+Version is 1; execution capabilities are bounded target read/exact create/exact
+modify only; validationExecution is NOT_PERMITTED. Its baseline fingerprint
+covers observed target entries, separately bound to actual root identity.
+
+MASTER accepts preflight before any write grant. NEW_OPERATION_STAGE_DISPATCH
+binds invocationId, bundle fingerprint, lineage, exact assignment, before-state
+fingerprint, predecessor acceptance and all host-accepted earlier stage records.
+Each grant binds invocation/role/root, exact path/action/before-state, plan
+lineage, dispatch, predecessor and independent file predicate. Repository
+reads are limited to assigned paths. Writes must match independently approved
+complete bytes before reaching the existing target broker. No source, shell,
+process, Maven, network or SQL execution is available. Generated query text is
+source data only within an independently approved file.
+
+The closed NEW_OPERATION_IMPLEMENTATION_RESULT_V1 artifact has exactly:
+implementationVersion (1), workflow (NEW_OPERATION), agent (active role), status
+(SUCCESS), lineage, runAuthorityBundleFingerprint, dispatchFingerprint,
+predecessorAcceptance, assignmentFingerprint, completedComponentDecisionIds,
+changedFiles, grantEffects. Assignment fingerprint role is
+NEW_OPERATION_STAGE_ASSIGNMENT. Completion lists every assigned component,
+including explicit REUSE/NOT_APPLICABLE decisions; changedFiles lists exactly
+mutable paths in assignment order. grantEffects must exactly match host broker
+receipts (same effect shape as migration). Empty stages return empty changes and
+effects. A success assertion is not evidence: the host also verifies full target
+state against only broker-observed mutations, independent file predicates, and
+all earlier accepted predicates before and after MASTER acceptance.
+
+Stage artifacts use OPERATION_IMPLEMENTATION_RESULT:<specialist-role-id>.
+NEW_OPERATION_STAGE_ACCEPTED records bind dispatch, bundle, MASTER acceptance,
+after-state and observed effects. Failed/interrupted stages retain a terminated
+record, nonaccepted candidate bytes where available and actual final effects;
+no dependent stage runs. Persistent external writes cannot become an authorized
+baseline. No automatic rollback is performed. Existing bounded non-Git,
+point-in-time observation and current-session limitations remain.
+
+After four accepted stages, retain all seven accepted artifacts, exact
+fingerprints, bundle and effect ledger. Require the separate profile below;
+otherwise stop BLOCKED NEW_OPERATION_VALIDATION_AUTHORITY_REQUIRED. A migration
+ValidationProfile alone cannot enable NEW_OPERATION validation.
+
+# NEW_OPERATION Controlled Validation Profile
+
+This executable bounded profile extends the existing host ValidationRuntime;
+it does not replace MIGRATION validation or activate its source/migration lineage.
+After 06 acceptance the embedding host must separately register
+`ValidationProfile.mavenOperationTest(hostMavenHome, hostReadOnlyRepository,
+acceptedOperationPlanFingerprint, requiredTests)`. This factory is not exposed
+through caller JSON, natural-language text, repository files or model tools.
+`requiredTests` maps every exact TEST obligation ID to a nonempty, duplicate-free
+list of independently reviewed Surefire `classname#name` identities. Unsupported
+test naming/report layouts block; the model cannot amend the mapping. The host
+must review the mapping and previously approved complete source predicates against
+the exact plan; a fingerprint alone does not establish semantic correctness.
+
+The closed host policy has policyVersion=1, workflow=NEW_OPERATION,
+operationPlanFingerprint, requiredTests, reportPolicy=FRESH_SUREFIRE_EXACT_TESTS_V1,
+and mavenProfile (the unchanged HOST_MAVEN_TEST view). Its fingerprint role is
+OPERATION_VALIDATION_POLICY. The host validates complete SUCCESS planning,
+rechecks all four accepted implementation stages, acceptance identities, exact
+content predicates and actual broker effects before deriving validation authority.
+
+NEW_OPERATION_VALIDATION_AUTHORITY_V1 has exactly authorityVersion=1,
+authorityKind=NEW_OPERATION_VALIDATION_AUTHORITY_V1, runId, role=07-validation,
+invocationId, authorityId, replayIdentity, operationContext, implementationResults,
+predecessorAcceptance, targetRootIdentity, workingRoot, profileId, trustedProfile,
+launchFingerprint, beforeTargetModes, beforeTargetFingerprint. Its fingerprint
+uses the same role as authorityKind. operationContext contains workflow, lineage,
+implementationAuthorityFingerprint, implementationResults, targetIdentity,
+implementationEffects, implementationLedgerFingerprint, postImplementationFingerprint,
+obligations, staticObligationEvidence, agent07SpecificationFingerprint,
+hostValidationPolicy and hostValidationPolicyFingerprint. Lineage is the exact
+NEW_OPERATION implementation lineage (caller, requirement, target analysis, plan).
+Each predecessor contains artifactRole, fingerprint, acceptanceInvocationId,
+acceptanceProviderResponseId and the exact host stageEvidence. Obligations retain
+requestedOperation, databaseMapping, fieldMappings, componentDecisions,
+requiredBehavioralChanges, placement, testObligations and validationObligations.
+No source root, source artifact, source-access gate or migration plan is required.
+The implementation bundle remains unchanged with validationExecution=NOT_PERMITTED.
+The response envelope's implementation bundle identifies the originating run;
+only the separate host validation authority permits the host process.
+
+The host, before calling 07, executes exactly once through the existing fixed
+Maven 3 direct-Java bootstrap: offline `test`, authorized target cwd, empty child
+environment, isolated settings/home/temp, reviewed read-only cache, fixed JVM flags,
+60-second timeout, bounded process-tree cleanup and 8 KiB captures per stream.
+No wrapper, shell, project `.mvn` directory, configurable goal or fallback command
+is allowed. 07 receives no tool operations. Source-code changes are unauthorized;
+only fresh root target/** build outputs are allowed during the host execution.
+After execution the complete observed target is frozen: 07 and MASTER acceptance
+may not mutate even build outputs. Known failures/effects survive response errors.
+
+For NEW_OPERATION, exit zero additionally requires fresh, bounded Surefire XML
+under target/surefire-reports/TEST-*.xml. The initial target/** scope must be absent.
+Retain exact safely screened report text and PATH_CONTENT fingerprints; correlate
+them with the current execution, before/after state and policy. Parse without DTDs,
+external entities, schema access or XInclude. At most 64 reports and 64 KiB total
+report bytes are retained. Require consistent suite/testcase counts, unique test
+identities and every required test executed with no failure/error/skip. Missing,
+malformed, unsupported or skipped required evidence blocks. Observed failure/error
+fails. Report data has no instruction or process authority. The bounded profile
+does not infer framework semantics or accept stale reports, arbitrary paths or
+report-only assertions as proof of business correctness.
+
+07 receives exact accepted artifacts, authority, plan obligations, independent
+static predicate evidence, host execution/effects and the host resultContract.
+The closed VALIDATION_RESULT retains the existing fields: resultVersion=1, role,
+invocationId, implementationResults, predecessorAcceptance, authorityId, profileId,
+hostExecutionEvidenceReference, exitCode, timedOut, repositoryEffects,
+validationStatus, failures. On this route migrationPlanFingerprint is forbidden;
+required replacements are workflow=NEW_OPERATION, lineage,
+implementationAuthorityFingerprint, validationAuthorityFingerprint and
+obligationEvidence. The latter contains static (HOST_APPROVED_EXACT_FILES_REVALIDATED),
+obligationsFingerprint and tests (host report/test-obligation results, or null when
+unavailable). All nested values must equal the current host projection exactly;
+unknown fields, forged facts, missing predecessors and contradictory outcomes reject.
+Retain original response bytes/fingerprint, never a canonical rewrite.
+
+The host re-observes effects after 07 and after MASTER. Only matching host SUCCESS,
+complete independent obligation/test evidence, unchanged implementation, unchanged
+post-execution state and MASTER ACCEPT_VALIDATION produce final SUCCESS with
+VALIDATION_MASTER_ACCEPTED. Executed nonzero/timeout, observed test failures or
+unauthorized effects yield FAILED. Missing authority/safe prerequisites or missing
+required evidence yield BLOCKED. A contrary 07 claim is a protocol rejection and
+cannot erase independently observed failure. Validation effects remain separate
+from the broker's implementation effects. No automatic retry or rollback exists.
+Placement is checked against exact accepted obligations, including coordinated
+changes/transaction consistency when present; omitted values create no defaults.
+
+These are bounded current-session, non-Git, point-in-time guarantees. Offline Maven
+resolution is not network confinement; build plugins/tests remain executable code
+requiring host review or external isolation. No OS/container isolation, company
+provider E2E, production database execution or Mantis integration is claimed.
+
 # Authority Hierarchy
 
 The following sources have distinct authority. One source must not absorb the
@@ -319,6 +595,10 @@ V1 uses these exact controlled artifact-role values for authority inputs:
 - `TARGET_ANALYSIS`;
 - `AGENT_02_SPECIFICATION`;
 - `MIGRATION_PLAN`;
+- `AGENT_00R_SPECIFICATION` (NEW_OPERATION pre-planning only);
+- `OPERATION_REQUIREMENT` (NEW_OPERATION pre-planning only);
+- `AGENT_02R_SPECIFICATION` (NEW_OPERATION planning only);
+- `OPERATION_PLAN` (NEW_OPERATION planning only);
 - `ORCHESTRATION_CONTRACT`;
 - `MASTER_SPECIFICATION`;
 - `SPECIALIST_SPECIFICATION`;
@@ -3004,11 +3284,14 @@ with role `RUNTIME_CAPABILITY_DECLARATION`:
 All fields are required; reject unknown/duplicate fields, unsupported versions
 or modes, empty strings, duplicate profiles, and ambiguous mappings. Identifiers
 are NFC strings. Sort profiles by `profileId` and roles by unsigned UTF-8 bytes.
-Roles are exactly `MASTER`, `00-source-analysis`, `01-target-analysis`,
+For MIGRATION, roles are exactly `MASTER`, `00-source-analysis`, `01-target-analysis`,
 `02-migration-planning`,
 `03-domain-contract-implementation`, `04-persistence-mapping-implementation`,
 `05-service-api-implementation`, `06-test-implementation`, and `07-validation`.
-Each occurs in exactly one profile: complete MASTER/00–07 coverage means all
+For NEW_OPERATION use the exact pre-planning role set in the workflow extension
+above, including 02R, without a source profile or an implementation capability claim.
+Each registered role occurs in exactly one profile: for MIGRATION,
+complete MASTER/00–07 coverage means all
 nine roles, including 00 even when no source specialist is executed. This does
 not make a role available merely because its launch profile is covered. Roles
 may share a profile only when the same evidenced launch mechanism and effective
